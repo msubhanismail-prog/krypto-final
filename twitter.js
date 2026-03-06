@@ -22,7 +22,6 @@ function releaseStartupBuffer() {
   if (startupComplete) return;
   startupComplete = true;
   console.log('Releasing ' + startupBuffer.length + ' buffered tweets sorted by time...');
-  // Sort oldest → newest so newest ends up on top in feed (feed prepends)
   startupBuffer.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   startupBuffer.forEach(payload => {
     if (broadcastFn) broadcastFn(payload);
@@ -68,7 +67,12 @@ async function resolveUserIds() {
       }
       await sleep(1000);
     } catch (err) {
-      console.error('Error resolving user IDs:', err.response?.data || err.message);
+      const title = err.response?.data?.title || err.message;
+      console.error('Error resolving user IDs:', title);
+      if (title === 'CreditsDepleted' || err.response?.status === 403) {
+        console.warn('Twitter credits depleted — skipping Twitter, website will still run');
+        return;
+      }
     }
   }
   saveCache();
@@ -138,17 +142,14 @@ async function pollAccount(userInfo, isStartup = false) {
     const data = await fetchTweets(id, lastTweetIds[id]);
     if (data.data && data.data.length > 0) {
       lastTweetIds[id] = data.data[0].id;
-      const tweets = [...data.data].reverse(); // oldest first
+      const tweets = [...data.data].reverse();
 
       tweets.forEach(tweet => {
-        // Hard block retweets
         if (/^RT @/i.test(tweet.text.trim())) return;
         if (tweet.referenced_tweets?.some(r => r.type === 'retweeted')) return;
         if (!shouldShowTweet(tweet.text)) return;
 
         const tweetAge = tweet.created_at ? Date.now() - new Date(tweet.created_at).getTime() : 0;
-
-        // During startup: only include tweets within 35 minutes
         if (isStartup && tweetAge > FRESH_WINDOW_MS) return;
 
         const payload = {
@@ -164,24 +165,24 @@ async function pollAccount(userInfo, isStartup = false) {
         };
 
         if (isStartup && !startupComplete) {
-          // Buffer during startup
           startupBuffer.push(payload);
         } else {
-          // Live tweets: broadcast immediately
           if (broadcastFn) broadcastFn(payload);
         }
       });
     }
   } catch (err) {
+    const title = err.response?.data?.title || err.message;
     if (err.response?.status === 429) {
       console.warn('Rate limited @' + username + ', waiting 5min');
       await sleep(5 * 60 * 1000);
+    } else if (title === 'CreditsDepleted' || err.response?.status === 403) {
+      console.warn('Credits depleted @' + username + ' — skipping, website still running');
     } else if (err.response?.status !== 404) {
-      console.error('Error @' + username + ':', err.response?.data?.title || err.message);
+      console.error('Error @' + username + ':', title);
     }
   }
 
-  // Track startup completion
   if (isStartup) {
     accountsPolled++;
     if (accountsPolled >= totalAccounts) {
@@ -193,15 +194,16 @@ async function pollAccount(userInfo, isStartup = false) {
 
 function startPollingEngine() {
   const users = Object.values(userIdMap);
-  if (users.length === 0) { console.error('No user IDs loaded.'); return; }
+  if (users.length === 0) {
+    console.warn('No user IDs loaded — Twitter polling skipped, website still running');
+    return;
+  }
 
   totalAccounts = users.length;
   accountsPolled = 0;
 
-  // STARTUP: poll all accounts once to get fresh tweets
   console.log('Startup: polling ' + users.length + ' accounts for last 35min tweets...');
 
-  // Failsafe: release buffer after 30s max regardless
   startupTimer = setTimeout(() => {
     if (!startupComplete) {
       console.log('Startup timeout — releasing buffer with ' + startupBuffer.length + ' tweets');
@@ -209,33 +211,27 @@ function startPollingEngine() {
     }
   }, 30000);
 
-  // Stagger startup polls to avoid rate limits
   users.forEach((user, i) => {
     setTimeout(() => pollAccount(user, true), i * 300);
   });
 
-  // LIVE POLLING: after startup, poll continuously
   const POLL_CYCLE_MS = 5 * 60 * 1000;
   const interval = Math.floor(POLL_CYCLE_MS / users.length);
   let index = 0;
 
-  // Start live polling after startup window
   setTimeout(() => {
-    startupComplete = true; // Ensure live mode after startup
+    startupComplete = true;
     setInterval(() => {
       const user = users[index % users.length];
       pollAccount(user, false);
       index++;
     }, interval);
 
-    // Poll priority accounts every 60 seconds
     const priority = users.filter(u => u.priority);
     setInterval(() => {
       priority.forEach(user => pollAccount(user, false));
     }, 60 * 1000);
 
-    // Poll custom user-added accounts every 3 minutes
-    // These are accounts users added to their tracking that aren't in the main 64
     setInterval(() => {
       const customUsers = Object.values(userIdMap).filter(u => u.custom);
       customUsers.forEach(user => pollAccount(user, false));
@@ -251,26 +247,27 @@ function startPollingEngine() {
 async function startTwitterPolling(broadcast) {
   broadcastFn = broadcast;
   console.log('Initialising Twitter engine...');
-  const cached = loadCache();
-  if (!cached || Object.keys(userIdMap).length < 10) {
-    console.log('Resolving Twitter user IDs...');
-    await resolveUserIds();
+  try {
+    const cached = loadCache();
+    if (!cached || Object.keys(userIdMap).length < 10) {
+      console.log('Resolving Twitter user IDs...');
+      await resolveUserIds();
+    }
+    startPollingEngine();
+  } catch (err) {
+    console.error('Twitter startup failed (website will still run):', err.message);
+    // App crash nahi hogi — website chalti rahegi
   }
-  startPollingEngine();
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── VALIDATE + FETCH FOR CUSTOM USER-TRACKED ACCOUNTS ─────────────────────
-// Called when a user adds a new account to their personal tracking list.
-// Returns { valid: true, user: {id, name, username} } or { valid: false }
 async function validateAndResolveUser(handle) {
   if (!BEARER) return { valid: false, reason: 'Twitter API not configured' };
   const clean = handle.replace('@', '').trim().toLowerCase();
   if (!clean || !/^[a-zA-Z0-9_]{1,50}$/.test(clean)) {
     return { valid: false, reason: 'Invalid username format' };
   }
-  // Check our existing cache first
   if (userIdMap[clean]) {
     return { valid: true, user: userIdMap[clean], cached: true };
   }
@@ -282,7 +279,6 @@ async function validateAndResolveUser(handle) {
     });
     if (res.data && res.data.data) {
       const u = res.data.data;
-      // Cache it so we can poll it
       userIdMap[clean] = { id: u.id, name: u.name, username: u.username, category: 'Custom', emoji: '👤', priority: false, custom: true };
       saveCache();
       return { valid: true, user: userIdMap[clean] };
@@ -295,8 +291,6 @@ async function validateAndResolveUser(handle) {
   }
 }
 
-// Fetch recent tweets for a custom tracked account and return them
-// Called on-demand when a user adds a new account to see their recent tweets
 async function fetchCustomUserTweets(handle) {
   if (!BEARER) return [];
   const clean = handle.replace('@', '').trim().toLowerCase();
@@ -326,7 +320,6 @@ async function fetchCustomUserTweets(handle) {
   }
 }
 
-// Get userIdMap so index.js can check if a handle is in main list
 function getUserIdMap() { return userIdMap; }
 
 module.exports = { startTwitterPolling, validateAndResolveUser, fetchCustomUserTweets, getUserIdMap };
