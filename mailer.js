@@ -1,21 +1,19 @@
 const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
-
 const USERS_FILE = path.join(__dirname, 'users.csv');
-
 function getTransporter() {
   return nodemailer.createTransport({
     host: 'smtp.hostinger.com',
     port: 465,
     secure: true,
+    family: 4,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
     }
   });
 }
-
 function saveUserToCSV(email, name) {
   const timestamp = new Date().toISOString();
   const line = '"' + name + '","' + email + '","' + timestamp + '","free"\n';
@@ -24,7 +22,6 @@ function saveUserToCSV(email, name) {
   }
   fs.appendFileSync(USERS_FILE, line);
 }
-
 async function sendOTPEmail(email, name, code) {
   const transporter = getTransporter();
   await transporter.sendMail({
@@ -54,7 +51,6 @@ async function sendOTPEmail(email, name, code) {
       '</table></td></tr></table></body></html>'
   });
 }
-
 async function notifyAdmin(email, name) {
   const transporter = getTransporter();
   await transporter.sendMail({
@@ -64,5 +60,4 @@ async function notifyAdmin(email, name) {
     html: '<div style="font-family:sans-serif;padding:20px;background:#f9f9f9;"><h2 style="color:#00b894;">New KryptoInsides Signup</h2><p><b>Name:</b> ' + name + '</p><p><b>Email:</b> ' + email + '</p><p><b>Time:</b> ' + new Date().toLocaleString() + '</p></div>'
   });
 }
-
 module.exports = { sendOTPEmail, notifyAdmin, saveUserToCSV };
