@@ -125,19 +125,21 @@ app.get('/dashboard.html', (req, res) => {
 const server = http.createServer(app);
 const wss    = new WebSocket.Server({ server });
 
-// ── FEED CACHE ────────────────────────────────────────────────────────────────
+// ── SHARED FEED CACHE (one cache for ALL users — no per-user Twitter scraping) ─
+// The server scrapes Twitter once on a schedule. Every user who logs in gets
+// the same shared 12-hour history. Twitter API credits are only spent once,
+// not once per user. Custom account tracking ONLY fires a separate API call
+// when a specific user explicitly adds a custom handle.
 const feed     = [];
-const MAX_FEED = 500;                          // ← increased from 200
+const MAX_FEED = 500;
+const TWELVE_HOURS = 12 * 60 * 60 * 1000;
 const FRESH_WINDOW = {
-  tweet:       12 * 60 * 60 * 1000,           // ← changed from 30 mins to 12 hours
-  news:        35 * 60 * 1000,
-  price_alert: 35 * 60 * 1000,
+  tweet:       TWELVE_HOURS,
+  news:        TWELVE_HOURS,
+  price_alert: TWELVE_HOURS,
 };
-const LOGIN_CAP = {
-  tweet:       100,                            // ← increased from 20
-  news:        25,
-  price_alert: 10,
-};
+// No LOGIN_CAP — send the full 12-hour history to every user on connect.
+// The frontend handles the 15-second animated loading bar while it renders.
 
 // ── CLIENTS ───────────────────────────────────────────────────────────────────
 const clients = new Set();
@@ -149,9 +151,9 @@ function broadcastRaw(msgStr, itemId) {
     if (itemId && ws._seen.has(itemId)) continue;
     if (itemId) {
       ws._seen.add(itemId);
-      if (ws._seen.size > 2000) {
+      if (ws._seen.size > 5000) {
         const iter = ws._seen.values();
-        for (let i = 0; i < 500; i++) ws._seen.delete(iter.next().value);
+        for (let i = 0; i < 1000; i++) ws._seen.delete(iter.next().value);
       }
     }
     try { ws.send(msgStr); } catch (e) { clients.delete(ws); }
@@ -168,7 +170,7 @@ setInterval(() => {
   }
 }, 30000);
 
-// ── NEW CONNECTION ────────────────────────────────────────────────────────────
+// ── NEW CONNECTION — send full 12hr shared cache to this user ─────────────────
 wss.on('connection', (ws, req) => {
   const origin  = req.headers.origin || '';
   const allowed = ALLOWED_ORIGINS.some(o => origin === o) || origin === '';
@@ -181,6 +183,7 @@ wss.on('connection', (ws, req) => {
   ws.on('message', () => {});
   clients.add(ws);
 
+  // Build full 12-hour snapshot from shared cache — same for every user
   const now = Date.now();
   const counts = { tweet: 0, news: 0, price_alert: 0 };
   const snapshot = feed
@@ -188,46 +191,50 @@ wss.on('connection', (ws, req) => {
       const ts  = item.createdAt || item.publishedAt || item.timestamp;
       const win = FRESH_WINDOW[item.type] || FRESH_WINDOW.news;
       if (!ts || (now - new Date(ts).getTime()) > win) return false;
-      const cap = LOGIN_CAP[item.type] || 20;
-      if (counts[item.type] >= cap) return false;
-      counts[item.type]++;
+      counts[item.type] = (counts[item.type] || 0) + 1;
       return true;
     })
-    .reverse();
+    .reverse(); // oldest first so frontend renders chronologically
 
   snapshot.forEach(item => {
     const id = item.id || item.tweetId;
     if (id) ws._seen.add(id);
   });
 
+  // Tell frontend how much history is coming so it can show a loading bar
   ws.send(JSON.stringify({
     type:       'batch_start',
-    tweetCount: counts.tweet,
-    newsCount:  counts.news + counts.price_alert,
+    tweetCount: counts.tweet || 0,
+    newsCount:  (counts.news || 0) + (counts.price_alert || 0),
     total:      snapshot.length,
   }));
 
+  // Stream in chunks of 10 so the connection isn't blocked
   let i = 0;
   function sendNext() {
     if (ws.readyState !== WebSocket.OPEN) return;
-    if (i >= snapshot.length) { ws.send(JSON.stringify({ type: 'batch_end' })); return; }
-    const chunk = snapshot.slice(i, i + 5);
+    if (i >= snapshot.length) {
+      ws.send(JSON.stringify({ type: 'batch_end' }));
+      return;
+    }
+    const chunk = snapshot.slice(i, i + 10);
     for (const item of chunk) {
       if (ws.readyState !== WebSocket.OPEN) return;
       try { ws.send(JSON.stringify(item)); } catch { return; }
     }
-    i += 5;
+    i += 10;
     setImmediate(sendNext);
   }
   setImmediate(sendNext);
 });
 
-// ── BROADCAST ─────────────────────────────────────────────────────────────────
+// ── BROADCAST — adds to shared cache and pushes to all live clients ───────────
 function broadcast(payload) {
   const now = Date.now();
   const ts  = payload.createdAt || payload.publishedAt || payload.timestamp;
   const win = FRESH_WINDOW[payload.type] || FRESH_WINDOW.news;
-  if (payload.type === 'tweet' && ts && (now - new Date(ts).getTime()) > win) return;
+  // Drop tweets older than 12 hours (stale API results)
+  if (ts && (now - new Date(ts).getTime()) > win) return;
   feed.unshift(payload);
   if (feed.length > MAX_FEED) feed.pop();
   if (payload.type === 'tweet') {
@@ -244,7 +251,7 @@ function broadcast(payload) {
   broadcastRaw(JSON.stringify(payload), itemId);
 }
 
-// ── FEED CACHE CLEANUP ────────────────────────────────────────────────────────
+// ── SHARED CACHE CLEANUP — remove items older than 12 hours ───────────────────
 setInterval(() => {
   const now = Date.now();
   for (let i = feed.length - 1; i >= 0; i--) {
@@ -357,6 +364,9 @@ app.get('/api/twitter/validate', rateLimit(30, 60 * 1000), async (req, res) => {
   res.json(result);
 });
 
+// ── CUSTOM TWEETS — only called when a user explicitly adds a custom account ──
+// This is the ONLY place a per-user Twitter API call is made.
+// The shared feed (64 accounts) uses a single polling cycle for everyone.
 app.get('/api/twitter/custom-tweets', rateLimit(20, 60 * 1000), async (req, res) => {
   const token  = req.headers['x-session-token'];
   const user   = getUserBySession(token);
@@ -618,7 +628,7 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', async () => {
   console.log('\n==================================');
   console.log('  KryptoInsides  ·  port ' + PORT);
-  console.log('  Unified feed — all users in sync');
+  console.log('  Shared 12hr cache — all users in sync');
   console.log('==================================\n');
   try { await startTwitterPolling(broadcast); }  catch (e) { console.error('Twitter:', e.message); }
   try { await startNewsPolling(broadcast); }      catch (e) { console.error('News:',    e.message); }
