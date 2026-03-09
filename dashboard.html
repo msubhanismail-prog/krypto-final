@@ -526,7 +526,7 @@
                     </div>
                     <div class="empty-state" id="feedEmpty" style="display:none;">
                         <div class="icon">⚡</div>
-                        <p>No tweets in the last 30 min.<br>Live updates will appear here instantly.</p>
+                        <p>No tweets in the last 12 hours.<br>Live updates will appear here instantly.</p>
                     </div>
                 </div>
             </div>
@@ -594,7 +594,7 @@
                         <div class="plan-badge free" id="accountBadge">✓ 3 Free Accounts</div>
                         <div class="input-row">
                             <input class="track-input" id="accountInput" placeholder="@username" onkeydown="if(event.key==='Enter')addAccount()">
-                            <button class="add-btn" onclick="addAccount()" id="addAccountBtn">+ Add</button>
+                            <button class="add-btn" onclick="addAccount()">+ Add</button>
                         </div>
                         <div class="limit-row">
                             <span class="limit-text" id="accountLimitText">0 / 3 free slots used</span>
@@ -767,6 +767,17 @@
     </nav>
 </div>
 
+<!-- LOADING OVERLAY -->
+<div id="loadingOverlay" style="position:fixed;inset:0;z-index:2000;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity 0.5s ease;">
+    <div style="font-size:28px;">⚡</div>
+    <div style="font-size:15px;font-weight:700;color:var(--text);">Loading last 12 hours</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:-10px;" id="loadingSubtext">Fetching tweets, news &amp; alerts…</div>
+    <div style="width:260px;height:6px;background:var(--surface2);border-radius:10px;overflow:hidden;">
+        <div id="loadingBar" style="height:100%;width:0%;background:var(--accent);border-radius:10px;transition:width 0.4s ease;"></div>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);" id="loadingStats"></div>
+</div>
+
 <!-- PRO MODAL -->
 <div class="modal-overlay" id="proModal">
     <div class="modal">
@@ -795,7 +806,7 @@
             <div class="feat"><div class="feat-icon">✓</div> Priority emergency alerts</div>
         </div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:14px;"><div style="font-size:12px;font-weight:700;margin-bottom:6px;">📱 Connect Telegram Alerts (optional)</div><div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Get instant alerts on Telegram after subscribing</div><div style="display:flex;gap:8px;"><input class="track-input" id="tgChatInputSettings" placeholder="Your Telegram Chat ID" style="font-size:12px;padding:7px 12px;"><button class="add-btn" onclick="connectTelegramFromSettings()" style="font-size:11px;padding:7px 12px;white-space:nowrap;">Connect</button></div><div style="font-size:10px;color:var(--text-muted);margin-top:6px;">Open <b>@kryptoinsidesbot</b> → send /start → copy your Chat ID</div><div id="tgSettingsStatus" style="font-size:11px;margin-top:6px;display:none;"></div></div>
-        <button class="pay-btn" onclick="handleCheckout()" id="checkoutBtn">Continue to Payment →</button>
+        <button class="pay-btn" onclick="handleCheckout()" id="payBtn">Continue to Payment →</button>
         <div class="modal-note">Secure payment · Cancel anytime · Instant access</div>
     </div>
 </div>
@@ -808,110 +819,13 @@ let isPro = false;
 let selectedPlan = 'annual';
 const allTweets = [];
 
-// ── SESSION TOKEN ──────────────────────────────────────────────────────────
-// Read from sessionStorage (set at login) — scoped to this browser tab session
-// localStorage is NOT used for user data — it would leak between accounts
-let SESSION_TOKEN = '';
-try { SESSION_TOKEN = sessionStorage.getItem('ki_session') || ''; } catch(e) {}
-
-// Per-user data — loaded from server on login, NOT from localStorage
-// This ensures each account sees only their own data
-let trackedAccounts = [];
-let trackedKeywords = [];
-let _userDataLoaded  = false;
-
-// Theme only uses localStorage (it's a visual preference, not user data)
+// Safe storage — falls back to memory if localStorage blocked
 const store = { _mem: {} };
 store.get = (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch(e) { return store._mem[k] !== undefined ? store._mem[k] : def; } };
 store.set = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} store._mem[k] = v; };
 
-// ── API HELPERS ────────────────────────────────────────────────────────────
-function apiHeaders() {
-    return { 'Content-Type': 'application/json', 'x-session-token': SESSION_TOKEN };
-}
-
-// Load user's saved tracking + telegram from server, and check their plan
-async function loadUserData() {
-    if (!SESSION_TOKEN) return;
-    try {
-        // Load plan + user info
-        const meRes = await fetch('/api/auth/me', { headers: { 'x-session-token': SESSION_TOKEN } });
-        if (!meRes.ok) {
-            // Session invalid — redirect to login
-            try { sessionStorage.removeItem('ki_session'); localStorage.removeItem('ki_session'); } catch(e) {}
-            window.location.href = '/';
-            return;
-        }
-        const me = await meRes.json();
-        if (!me.authenticated) {
-            window.location.href = '/';
-            return;
-        }
-        // Set pro status from server — can't be faked
-        if (me.user && me.user.plan === 'pro') {
-            isPro = true;
-            const ub = document.querySelector('.upgrade-badge');
-            if (ub) { ub.textContent = '⭐ Pro'; ub.style.background = 'var(--purple)'; ub.onclick = null; }
-        }
-        // Update display name if available
-        if (me.user && me.user.name) {
-            const nameEl = document.getElementById('userDisplayName');
-            if (nameEl) nameEl.textContent = me.user.name;
-        }
-
-        // Load user's personal data
-        const r = await fetch('/api/user/data', { headers: { 'x-session-token': SESSION_TOKEN } });
-        if (!r.ok) return;
-        const d = await r.json();
-        trackedAccounts = (d.tracking && d.tracking.accounts) ? d.tracking.accounts : [];
-        trackedKeywords = (d.tracking && d.tracking.keywords) ? d.tracking.keywords : [];
-        if (d.telegram) {
-            tgChatId = d.telegram.chatId || '';
-            tgPrefs  = d.telegram.prefs  || { emergency: true, news: true, accounts: true, keywords: true };
-        }
-        _userDataLoaded = true;
-        renderAccountList();
-        renderKeywordList();
-        renderTelegramUI();
-
-        // For any custom-tracked accounts (outside main 64), fetch their recent tweets
-        // Small delay to let the main WebSocket feed load first
-        if (trackedAccounts.length > 0) {
-            setTimeout(() => {
-                trackedAccounts.forEach(handle => {
-                    // Only fetch if not already in main feed (will be deduplicated anyway)
-                    _fetchAndShowCustomTweets(handle);
-                });
-            }, 5000);
-        }
-    } catch(e) {
-        console.warn('[Data] Could not load user data:', e.message);
-    }
-}
-
-// Save tracking to server (debounced — waits 500ms after last change)
-let _saveTrackingTimer = null;
-function _scheduleSaveTracking() {
-    if (_saveTrackingTimer) clearTimeout(_saveTrackingTimer);
-    _saveTrackingTimer = setTimeout(() => {
-        if (!SESSION_TOKEN) return;
-        fetch('/api/user/tracking', {
-            method:  'POST',
-            headers: apiHeaders(),
-            body:    JSON.stringify({ accounts: trackedAccounts, keywords: trackedKeywords })
-        }).catch(e => console.warn('[Save] Tracking save failed:', e.message));
-    }, 500);
-}
-
-// Save telegram connection to server
-function _saveTelegramToServer(chatId, prefs) {
-    if (!SESSION_TOKEN) return;
-    fetch('/api/user/telegram', {
-        method:  'POST',
-        headers: apiHeaders(),
-        body:    JSON.stringify({ chatId: chatId || null, prefs })
-    }).catch(e => console.warn('[Save] Telegram save failed:', e.message));
-}
+let trackedAccounts = store.get('ki_accounts', []);
+let trackedKeywords = store.get('ki_keywords', []);
 
 // ── THEME ─────────────────────────────────────────────────────────────────
 function toggleTheme() {
@@ -996,6 +910,7 @@ let _inBatch      = false;
 let _batchTweets  = [];
 let _batchNews    = [];
 let _batchStartTime = 0;
+let _batchTotal = 0;
 
 // Two independent drip queues — tweets and news drip at different speeds
 let _tweetQueue    = [];
@@ -1037,53 +952,73 @@ function handleBatchStart(data) {
     _batchTweets = [];
     _batchNews = [];
     _batchStartTime = Date.now();
-    // Reset visible counters — we're about to replay the whole snapshot
+    _batchTotal = data.total || 0;
+    // Reset visible counters
     tweetCount = 0; newsCount = 0;
     document.getElementById('tweetCount').textContent = '';
     document.getElementById('newsCount').textContent  = '';
-    // Clear feed panels so reconnect shows fresh content, not stacked duplicates
+    // Clear feed panels so reconnect shows fresh content
     const fs = document.getElementById('feedScroll');
     if (fs) fs.innerHTML = '';
     const ns = document.getElementById('newsScroll');
     if (ns) ns.innerHTML = '';
+    // Show loading overlay with 15-second animated bar
+    showLoadingOverlay(data.tweetCount || 0, data.newsCount || 0, data.total || 0);
 }
 
 function handleBatchEnd() {
     _inBatch = false;
     const loadMs = Date.now() - _batchStartTime;
-    const now    = Date.now();
 
-    // ── TWEETS ─────────────────────────────────────────────────────────
-    // Server already enforces freshness window — do NOT re-filter here.
-    // Re-filtering caused tweets to vanish due to network/processing latency.
-    // Just sort oldest→newest and cap so user isn't flooded.
+    // Sort oldest→newest — NO cap, server sends full 12hr history
     const freshTweets = _batchTweets
-        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
-        .slice(-20); // newest 20 max — matches server LOGIN_CAP
+        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
 
-    // ── NEWS + PRICE ALERTS ─────────────────────────────────────────────
-    // Server enforces 35-min window — trust it. Sort oldest→newest for drip.
     const freshNews = _batchNews
         .sort((a, b) => {
             const ta = new Date(a.publishedAt || a.timestamp || 0);
             const tb = new Date(b.publishedAt || b.timestamp || 0);
-            return ta - tb; // oldest first
-        })
-        .slice(-35); // max 35 combined items on login
+            return ta - tb;
+        });
 
-    // Queue both drips — they run independently, neither blocks the other
+    // Also scan all batch tweets for keyword + custom account matches
+    freshTweets.forEach(t => {
+        allTweets.push(t);
+        const handle = (t.author?.username || '').toLowerCase();
+        if (trackedAccounts.includes(handle)) {
+            const cs = document.getElementById('customScroll');
+            const ce = document.getElementById('customEmpty');
+            if (ce) ce.remove();
+            cs.appendChild(buildTweetCard(t));
+            customCount++;
+            document.getElementById('customCount').textContent = customCount + ' tweets';
+            updateTrackedSub(handle);
+        }
+        trackedKeywords.forEach(kw => {
+            if (t.text && t.text.toLowerCase().includes(kw.toLowerCase())) {
+                const ks = document.getElementById('kwScroll');
+                const ke = document.getElementById('kwEmpty');
+                if (ke) ke.remove();
+                ks.appendChild(buildKwCard(t, kw));
+                kwMatchCount++;
+                document.getElementById('kwFeedCount').textContent = kwMatchCount + ' matches';
+                document.getElementById('kwBadge').textContent = kwMatchCount > 99 ? '99+' : kwMatchCount;
+            }
+        });
+    });
+
+    // Queue both drips — they run independently
     _tweetQueue = [...freshTweets];
     _newsQueue  = [...freshNews];
 
-    // Small delay before drip starts — let page settle after connect
-    setTimeout(() => {
+    // Hide loading overlay then start drip
+    hideLoadingOverlay(freshTweets.length, freshNews.length, () => {
         startTweetDrip();
         startNewsDrip();
-    }, 400);
+    });
 
-    console.log(`[Feed] ready in ${(loadMs/1000).toFixed(2)}s | ${freshTweets.length} tweets → drip | ${freshNews.length} news → drip`);
+    console.log(`[Feed] 12hr history | ${freshTweets.length} tweets | ${freshNews.length} news | loaded in ${(loadMs/1000).toFixed(1)}s`);
 
-    // If server sent nothing at all, hide skeletons and show proper empty state
     if (freshTweets.length === 0) {
         const sk = document.getElementById('feedSkeleton');
         if (sk) sk.remove();
@@ -1099,6 +1034,59 @@ function handleBatchEnd() {
 
     _batchTweets = [];
     _batchNews   = [];
+}
+
+// ── LOADING OVERLAY FUNCTIONS ─────────────────────────────────────────────
+let _loadingTimer = null;
+let _loadingProgress = 0;
+let _batchTotal = 0;
+
+function showLoadingOverlay(tweetCnt, newsCnt, total) {
+    const overlay = document.getElementById('loadingOverlay');
+    if (!overlay) return;
+    overlay.style.opacity = '1';
+    overlay.style.display = 'flex';
+    overlay.style.pointerEvents = 'all';
+    const bar   = document.getElementById('loadingBar');
+    const sub   = document.getElementById('loadingSubtext');
+    const stats = document.getElementById('loadingStats');
+    if (stats) stats.textContent = tweetCnt + ' tweets · ' + newsCnt + ' news & alerts';
+    if (sub)   sub.textContent   = 'Fetching last 12 hours of activity…';
+    if (bar)   bar.style.width   = '0%';
+    _loadingProgress = 0;
+    // Animate bar over 15 seconds
+    if (_loadingTimer) clearInterval(_loadingTimer);
+    const steps     = 150; // 15s / 100ms per step
+    const increment = 92 / steps; // go to 92% — last 8% fills on batch_end
+    _loadingTimer = setInterval(() => {
+        _loadingProgress = Math.min(_loadingProgress + increment, 92);
+        if (bar) bar.style.width = _loadingProgress + '%';
+        // Update subtext at milestones
+        if (sub) {
+            if (_loadingProgress > 60) sub.textContent = 'Almost ready…';
+            else if (_loadingProgress > 30) sub.textContent = 'Loading tweets & news…';
+        }
+    }, 100);
+}
+
+function hideLoadingOverlay(tweetCnt, newsCnt, callback) {
+    if (_loadingTimer) { clearInterval(_loadingTimer); _loadingTimer = null; }
+    const overlay = document.getElementById('loadingOverlay');
+    const bar     = document.getElementById('loadingBar');
+    const sub     = document.getElementById('loadingSubtext');
+    const stats   = document.getElementById('loadingStats');
+    // Fill to 100%
+    if (bar) bar.style.width = '100%';
+    if (sub) sub.textContent = 'Ready! ' + tweetCnt + ' tweets · ' + newsCnt + ' news & alerts loaded';
+    if (stats) stats.textContent = 'Last 12 hours of activity';
+    setTimeout(() => {
+        if (overlay) {
+            overlay.style.opacity = '0';
+            overlay.style.pointerEvents = 'none';
+            setTimeout(() => { overlay.style.display = 'none'; }, 500);
+        }
+        if (callback) callback();
+    }, 800);
 }
 
 function handleTweet(data) {
@@ -1329,115 +1317,31 @@ function buildKwCard(data, kw) {
 }
 
 // ── ACCOUNT TRACKING ──────────────────────────────────────────────────────
-async function addAccount() {
-    const input = document.getElementById('accountInput');
-    let val = (input.value || '').trim().replace('@','').toLowerCase();
+function addAccount() {
+    let val = document.getElementById('accountInput').value.trim().replace('@','').toLowerCase();
     if (!val) return;
-    if (!/^[a-zA-Z0-9_]{1,50}$/.test(val)) {
-        _showAccountStatus('❌ Invalid username — only letters, numbers and underscores allowed.', 'var(--danger)');
-        return;
-    }
-    if (trackedAccounts.includes(val)) {
-        _showAccountStatus('Already tracking @' + val, 'var(--text-muted)');
-        return;
-    }
+    if (trackedAccounts.includes(val)) { alert('Already tracking @' + val); return; }
     if (!isPro && trackedAccounts.length >= FREE_LIMIT) { showProModal(); return; }
-
-    // Show loading state
-    const btn = document.getElementById('addAccountBtn');
-    if (btn) { btn.disabled = true; btn.textContent = '…'; }
-    _showAccountStatus('🔍 Checking @' + val + ' on Twitter…', 'var(--text-muted)');
-
-    try {
-        const r = await fetch('/api/twitter/validate?handle=' + encodeURIComponent(val), {
-            headers: { 'x-session-token': SESSION_TOKEN }
-        });
-        const d = await r.json();
-
-        if (!d.valid) {
-            _showAccountStatus('❌ ' + (d.reason || '@' + val + ' not found on Twitter'), 'var(--danger)');
-            if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
-            return;
-        }
-
-        // Valid! Add to list
-        trackedAccounts.push(val);
-        _scheduleSaveTracking();
-        input.value = '';
-        _showAccountStatus('✅ Now tracking @' + val, 'var(--accent)');
-        setTimeout(() => _showAccountStatus('', ''), 3000);
-        if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
-        renderAccountList();
-
-        // First scan cached live tweets from main feed
-        let foundInCache = 0;
-        allTweets.forEach(t => {
-            if ((t.author?.username||'').toLowerCase() === val) {
-                const ce = document.getElementById('customEmpty');
-                if (ce) ce.remove();
-                const cs = document.getElementById('customScroll');
-                cs.insertBefore(buildTweetCard(t), cs.firstChild);
-                customCount++;
-                foundInCache++;
-            }
-        });
-        if (foundInCache > 0) {
+    trackedAccounts.push(val);
+    store.set('ki_accounts', trackedAccounts);
+    document.getElementById('accountInput').value = '';
+    renderAccountList();
+    // Scan cached tweets immediately
+    allTweets.forEach(t => {
+        if ((t.author?.username||'').toLowerCase() === val) {
+            const ce = document.getElementById('customEmpty');
+            if (ce) ce.remove();
+            const cs = document.getElementById('customScroll');
+            cs.insertBefore(buildTweetCard(t), cs.firstChild);
+            customCount++;
             document.getElementById('customCount').textContent = customCount + ' tweets';
         }
-
-        // If not in main feed (custom account), fetch their recent tweets directly
-        if (!d.cached) {
-            _fetchAndShowCustomTweets(val);
-        }
-
-    } catch(e) {
-        _showAccountStatus('❌ Could not verify — check your internet connection.', 'var(--danger)');
-        if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
-    }
-}
-
-function _showAccountStatus(msg, color) {
-    let el = document.getElementById('accountStatus');
-    if (!el) {
-        el = document.createElement('div');
-        el.id = 'accountStatus';
-        el.style.cssText = 'font-size:11px;margin-top:6px;min-height:16px;transition:all 0.2s;';
-        const limitRow = document.querySelector('.limit-row');
-        if (limitRow) limitRow.parentNode.insertBefore(el, limitRow);
-    }
-    el.textContent = msg;
-    el.style.color = color || 'var(--text-muted)';
-}
-
-// Fetch recent tweets for a custom account (not in main 64) and show in custom feed
-async function _fetchAndShowCustomTweets(handle) {
-    try {
-        const r = await fetch('/api/twitter/custom-tweets?handle=' + encodeURIComponent(handle), {
-            headers: { 'x-session-token': SESSION_TOKEN }
-        });
-        const d = await r.json();
-        if (!d.tweets || d.tweets.length === 0) return;
-        const cs = document.getElementById('customScroll');
-        const ce = document.getElementById('customEmpty');
-        if (ce) ce.remove();
-        // Insert oldest first so newest is on top
-        [...d.tweets].reverse().forEach(t => {
-            const card = buildTweetCard(t);
-            cs.insertBefore(card, cs.firstChild);
-            customCount++;
-            // Also add to allTweets cache so keyword matching works
-            allTweets.unshift(t);
-        });
-        document.getElementById('customCount').textContent = customCount + ' tweets';
-        updateTrackedSub(handle);
-    } catch(e) {
-        console.warn('[Custom] Could not fetch tweets for @' + handle);
-    }
+    });
 }
 
 function removeAccount(handle) {
     trackedAccounts = trackedAccounts.filter(a => a !== handle);
-    _scheduleSaveTracking();
+    store.set('ki_accounts', trackedAccounts);
     renderAccountList();
 }
 
@@ -1482,7 +1386,7 @@ function addKeyword() {
     if (trackedKeywords.map(k=>k.toLowerCase()).includes(val.toLowerCase())) { alert('Already tracking "' + val + '"'); return; }
     if (!isPro && trackedKeywords.length >= FREE_LIMIT) { showProModal(); return; }
     trackedKeywords.push(val);
-    _scheduleSaveTracking();
+    store.set('ki_keywords', trackedKeywords);
     document.getElementById('kwInput').value = '';
     renderKeywordList();
     // Scan cached tweets immediately
@@ -1500,7 +1404,7 @@ function addKeyword() {
 
 function removeKeyword(kw) {
     trackedKeywords = trackedKeywords.filter(k => k !== kw);
-    _scheduleSaveTracking();
+    store.set('ki_keywords', trackedKeywords);
     renderKeywordList();
 }
 
@@ -1536,26 +1440,9 @@ function selectPlan(plan) {
     document.getElementById('planMonthly').classList.toggle('selected', plan==='monthly');
     document.getElementById('planAnnual').classList.toggle('selected', plan==='annual');
 }
-async function handleCheckout() {
-    const btn = document.getElementById('checkoutBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
-    try {
-        const r = await fetch('/api/checkout', {
-            method:  'POST',
-            headers: apiHeaders(),
-            body:    JSON.stringify({ plan: selectedPlan, chatId: tgChatId || '' })
-        });
-        const d = await r.json();
-        if (d.url) {
-            window.location.href = d.url;   // redirect to Stripe Checkout
-        } else {
-            alert('Checkout error: ' + (d.error || 'Please try again.'));
-            if (btn) { btn.disabled = false; btn.textContent = 'Upgrade Now'; }
-        }
-    } catch(e) {
-        alert('Could not reach server. Please try again.');
-        if (btn) { btn.disabled = false; btn.textContent = 'Upgrade Now'; }
-    }
+function handleCheckout() {
+    alert('Payment coming soon!\nPlan: ' + (selectedPlan==='annual'?'$99.9/year':'$9.49/month') + '\n\nStripe integration next step.');
+    hideProModal();
 }
 
 // ── MOBILE ────────────────────────────────────────────────────────────────
@@ -1614,29 +1501,11 @@ let _tsInterval = setInterval(function() {
         if (ts) el.textContent = formatTime(ts);
     });
 }, 1000);
-function signOut() {
-    if (!confirm('Sign out?')) return;
-    const token = SESSION_TOKEN;
-    // Clear session from both storages
-    try { sessionStorage.removeItem('ki_session'); } catch(e) {}
-    try { localStorage.removeItem('ki_session'); localStorage.removeItem('ki_user'); } catch(e) {}
-    SESSION_TOKEN = '';
-    // Notify server to invalidate session
-    if (token) {
-        fetch('/api/auth/signout', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-session-token': token },
-            body: JSON.stringify({ token })
-        }).catch(() => {});
-    }
-    window.location.href = '/';
-}
+function signOut() { if(confirm('Sign out?')) window.location.href='/'; }
 
 // ── TELEGRAM ──────────────────────────────────────────────────────────────
-// tgChatId and tgPrefs are initialized here; they get populated from the server
-// via loadUserData() when the user logs in. NOT from localStorage.
-let tgChatId = '';
-let tgPrefs = { emergency: true, news: true, accounts: true, keywords: true };
+let tgChatId = store.get('ki_tg_chatid', '');
+let tgPrefs = store.get('ki_tg_prefs', { emergency: true, news: true, accounts: true, keywords: true });
 
 function renderTelegramUI() {
     const connected = !!tgChatId;
@@ -1692,7 +1561,7 @@ function _doConnect(inputId, statusId) {
         if (btn) { btn.disabled = false; btn.textContent = 'Connect'; }
         if (d.success) {
             tgChatId = val;
-            _saveTelegramToServer(val, tgPrefs);
+            store.set('ki_tg_chatid', val);
             if (input) input.value = '';
             renderTelegramUI();
             _showStatus(statusId, '✅ Connected! Check your Telegram for a confirmation message.', 'var(--accent)');
@@ -1730,7 +1599,7 @@ function connectTelegramFromSettings() {
 function disconnectTelegram() {
     if (!confirm('Disconnect Telegram alerts?')) return;
     tgChatId = '';
-    _saveTelegramToServer('', tgPrefs);
+    store.set('ki_tg_chatid', '');
     renderTelegramUI();
     const s = document.getElementById('tgSettingsStatus');
     if (s) { s.textContent = 'Disconnected.'; s.style.color = 'var(--text-muted)'; s.style.display = 'block'; }
@@ -1743,7 +1612,7 @@ function saveTgPrefs() {
         accounts: document.getElementById('pref_accounts').checked,
         keywords: document.getElementById('pref_keywords').checked
     };
-    _saveTelegramToServer(tgChatId, tgPrefs);
+    store.set('ki_tg_prefs', tgPrefs);
 }
 
 function syncTelegram() {
@@ -1780,55 +1649,10 @@ function syncTelegram() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────
-// Load user's personal data from server, THEN render and connect
-// This is what gives each user their own separate tracking lists / Telegram settings
-(async function init() {
-    // Validate session — if not logged in, redirect to home
-    if (!SESSION_TOKEN) {
-        // Try reading from localStorage as fallback (for session token only)
-        try {
-            const t = localStorage.getItem('ki_session');
-            if (t) { SESSION_TOKEN = t; sessionStorage.setItem('ki_session', t); }
-        } catch(e) {}
-    }
-    if (SESSION_TOKEN) {
-        await loadUserData();
-    }
-    // These will show empty state if no data loaded yet (not logged in case)
-    if (!_userDataLoaded) {
-        renderAccountList();
-        renderKeywordList();
-        renderTelegramUI();
-    }
-    connect();
-
-    // Handle return from Stripe Checkout
-    const urlParams = new URLSearchParams(window.location.search);
-    const stripeSession = urlParams.get('session_id');
-    if (stripeSession && SESSION_TOKEN) {
-        fetch('/api/verify-payment?session_id=' + encodeURIComponent(stripeSession))
-            .then(r => r.json())
-            .then(d => {
-                if (d.success) {
-                    isPro = true;
-                    renderAccountList();
-                    renderKeywordList();
-                    // Show success toast
-                    const toast = document.createElement('div');
-                    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#00b894;color:white;padding:12px 24px;border-radius:30px;font-weight:700;z-index:9999;box-shadow:0 4px 20px rgba(0,184,148,0.4);';
-                    toast.textContent = '🎉 You are now a Pro member! Enjoy unlimited tracking.';
-                    document.body.appendChild(toast);
-                    setTimeout(() => toast.remove(), 5000);
-                    // Clean URL
-                    window.history.replaceState({}, '', '/dashboard.html');
-                    // Hide upgrade button
-                    const ub = document.querySelector('.upgrade-badge');
-                    if (ub) { ub.textContent = '⭐ Pro'; ub.style.background = 'var(--purple)'; }
-                }
-            })
-            .catch(() => {});
-    }
-})();
+renderAccountList();
+renderKeywordList();
+renderTelegramUI();
+connect();
 
 // ── TELEGRAM CTA TRACKING — spec §3.5 ────────────────────────────────────
 function trackTelegramClick() {
