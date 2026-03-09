@@ -280,6 +280,31 @@
         .pay-btn { width: 100%; background: var(--accent); color: white; border: none; border-radius: 30px; padding: 14px; font-weight: 700; font-size: 15px; cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s; }
         .pay-btn:hover { background: #00a07f; }
         .modal-note { text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 10px; }
+
+        /* HELP BUTTON */
+        .help-btn { display: flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 30px; background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); font-family: 'Inter', sans-serif; white-space: nowrap; transition: all 0.15s; }
+        .help-btn:hover { background: var(--surface2); color: var(--accent); border-color: var(--accent); }
+
+        /* FEEDBACK STARS */
+        .stars { display: flex; gap: 6px; margin: 8px 0 14px; }
+        .star { font-size: 26px; cursor: pointer; opacity: 0.3; transition: opacity 0.15s, transform 0.1s; }
+        .star:hover, .star.active { opacity: 1; transform: scale(1.15); }
+
+        /* CANCEL PLAN */
+        .cancel-plan-link { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px; cursor: pointer; text-decoration: underline; }
+        .cancel-plan-link:hover { color: var(--danger); }
+
+        /* FEEDBACK TEXTAREA */
+        .feedback-area { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; resize: vertical; outline: none; min-height: 90px; transition: border 0.15s; }
+        .feedback-area:focus { border-color: var(--accent); }
+        .feedback-category { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+        .fcat { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
+        .fcat.selected { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+        @media (max-width: 720px) {
+            .help-btn { padding: 0; width: 34px; height: 34px; border-radius: 50%; justify-content: center; background: transparent; border: none; font-size: 16px; }
+            .help-btn span.help-text { display: none; }
+        }
         .tg-pref-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; margin-bottom:4px; cursor:pointer; font-size:13px; transition:background 0.1s; }
         #panelTelegram .tracking-col { justify-content:flex-start; }
         .tg-pref-row:hover { background:var(--surface2); }
@@ -461,6 +486,7 @@
             </a>
             <button class="upgrade-badge" onclick="showProModal()">✨ Upgrade</button>
             <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌙</div>
+            <button class="help-btn" onclick="showHelpModal()" title="Help & Feedback">❓<span class="help-text">Help</span></button>
             <button class="sign-out" onclick="signOut()"><span>🚪</span><span class="sign-out-text">Sign out</span></button>
         </div>
     </div>
@@ -797,6 +823,74 @@
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:14px;"><div style="font-size:12px;font-weight:700;margin-bottom:6px;">📱 Connect Telegram Alerts (optional)</div><div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Get instant alerts on Telegram after subscribing</div><div style="display:flex;gap:8px;"><input class="track-input" id="tgChatInputSettings" placeholder="Your Telegram Chat ID" style="font-size:12px;padding:7px 12px;"><button class="add-btn" onclick="connectTelegramFromSettings()" style="font-size:11px;padding:7px 12px;white-space:nowrap;">Connect</button></div><div style="font-size:10px;color:var(--text-muted);margin-top:6px;">Open <b>@kryptoinsidesbot</b> → send /start → copy your Chat ID</div><div id="tgSettingsStatus" style="font-size:11px;margin-top:6px;display:none;"></div></div>
         <button class="pay-btn" onclick="handleCheckout()" id="payBtn">Continue to Payment →</button>
         <div class="modal-note">Secure payment · Cancel anytime · Instant access</div>
+        <div class="cancel-plan-link" id="cancelPlanLink" style="display:none;" onclick="handleCancelPlan()">Cancel my subscription</div>
+    </div>
+</div>
+
+<!-- HELP & FEEDBACK MODAL -->
+<div class="modal-overlay" id="helpModal">
+    <div class="modal" style="max-width:460px;">
+        <button class="modal-close" onclick="hideHelpModal()">✕</button>
+
+        <!-- TABS inside modal -->
+        <div id="helpView">
+            <div style="font-size:28px;margin-bottom:10px;">🙋</div>
+            <h2 style="margin-bottom:6px;">Help & Feedback</h2>
+            <p style="margin-bottom:18px;">Got a question or something to share? We read every message.</p>
+
+            <div style="display:flex;gap:8px;margin-bottom:20px;">
+                <button onclick="switchHelpTab('help')" id="htabHelp" style="flex:1;padding:9px;border-radius:10px;border:2px solid var(--accent);background:var(--accent-dim);color:var(--accent);font-weight:700;font-size:12px;cursor:pointer;font-family:Inter,sans-serif;">❓ Get Help</button>
+                <button onclick="switchHelpTab('feedback')" id="htabFeedback" style="flex:1;padding:9px;border-radius:10px;border:2px solid var(--border);background:var(--surface2);color:var(--text-muted);font-weight:700;font-size:12px;cursor:pointer;font-family:Inter,sans-serif;">💬 Give Feedback</button>
+            </div>
+
+            <!-- GET HELP TAB -->
+            <div id="htabHelpContent">
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px;">
+                    <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Common Questions</div>
+                    <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">Why aren't tweets showing? <span style="float:right;color:var(--text-muted);">+</span></div>
+                    <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">The feed loads the last 6 hours on login. If blank, try refreshing. Your connection dot (top left) should be green.</div>
+                    <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">How do I get Telegram alerts? <span style="float:right;color:var(--text-muted);">+</span></div>
+                    <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">Go to the Telegram tab → search @kryptoinsidesbot → send /start → paste your Chat ID.</div>
+                    <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">How do I cancel my Pro plan? <span style="float:right;color:var(--text-muted);">+</span></div>
+                    <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">Email us at <a href="mailto:info@kryptoinsides.com" style="color:var(--accent);">info@kryptoinsides.com</a> and we'll cancel it within 24 hours. No questions asked.</div>
+                    <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;font-size:13px;font-weight:600;">What accounts does KryptoInsides track? <span style="float:right;color:var(--text-muted);">+</span></div>
+                    <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">We track 64 curated crypto accounts including whale alerts, top traders, founders, and news sources. You can add your own custom accounts in My Tracking.</div>
+                </div>
+                <div style="background:var(--accent-dim);border:1px solid rgba(0,184,148,0.2);border-radius:14px;padding:14px;text-align:center;">
+                    <div style="font-size:13px;font-weight:700;margin-bottom:4px;">Still need help?</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">We typically reply within a few hours.</div>
+                    <a href="mailto:info@kryptoinsides.com?subject=KryptoInsides Help" style="display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:white;padding:9px 20px;border-radius:30px;font-weight:700;font-size:13px;text-decoration:none;">
+                        ✉️ Email Support
+                    </a>
+                </div>
+            </div>
+
+            <!-- FEEDBACK TAB -->
+            <div id="htabFeedbackContent" style="display:none;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:6px;">How's your experience so far?</div>
+                <div class="stars" id="starRow">
+                    <span class="star" onclick="setRating(1)" data-v="1">⭐</span>
+                    <span class="star" onclick="setRating(2)" data-v="2">⭐</span>
+                    <span class="star" onclick="setRating(3)" data-v="3">⭐</span>
+                    <span class="star" onclick="setRating(4)" data-v="4">⭐</span>
+                    <span class="star" onclick="setRating(5)" data-v="5">⭐</span>
+                </div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">What's this about?</div>
+                <div class="feedback-category" id="fcatRow">
+                    <div class="fcat selected" onclick="toggleFcat(this)">🐛 Bug</div>
+                    <div class="fcat" onclick="toggleFcat(this)">💡 Feature Idea</div>
+                    <div class="fcat" onclick="toggleFcat(this)">📰 Missing Source</div>
+                    <div class="fcat" onclick="toggleFcat(this)">⚡ Performance</div>
+                    <div class="fcat" onclick="toggleFcat(this)">🎨 Design</div>
+                    <div class="fcat" onclick="toggleFcat(this)">❤️ Praise</div>
+                </div>
+                <textarea class="feedback-area" id="feedbackText" placeholder="Tell us what you think — good, bad, or ugly. Every word helps us improve."></textarea>
+                <input class="track-input" id="feedbackEmail" placeholder="Your email (optional — for us to reply)" style="margin-top:8px;margin-bottom:12px;width:100%;">
+                <button class="pay-btn" onclick="submitFeedback()" id="feedbackBtn" style="font-size:14px;padding:12px;">Send Feedback →</button>
+                <div id="feedbackStatus" style="font-size:12px;text-align:center;margin-top:8px;display:none;"></div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -1410,9 +1504,56 @@ function selectPlan(plan) {
     document.getElementById('planAnnual').classList.toggle('selected', plan==='annual');
 }
 function handleCheckout() {
-    alert('Payment coming soon!\nPlan: ' + (selectedPlan==='annual'?'$99.9/year':'$9.49/month') + '\n\nStripe integration next step.');
-    hideProModal();
+    const btn = document.getElementById('payBtn');
+    btn.disabled = true;
+    btn.textContent = 'Redirecting…';
+
+    const token = sessionStorage.getItem('ki_token') || localStorage.getItem('ki_token');
+
+    fetch('/api/checkout', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'x-session-token': token } : {})
+        },
+        body: JSON.stringify({
+            plan: selectedPlan,
+            successUrl: window.location.origin + '/dashboard.html?upgrade=success',
+            cancelUrl:  window.location.origin + '/dashboard.html?upgrade=cancelled'
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.url) {
+            window.location.href = data.url;
+        } else {
+            throw new Error(data.error || 'No checkout URL');
+        }
+    })
+    .catch(err => {
+        console.error('[Checkout]', err);
+        btn.disabled = false;
+        btn.textContent = 'Continue to Payment →';
+        alert('Checkout failed. Please try again or contact support@kryptoinsides.com');
+    });
 }
+
+// ── HANDLE RETURN FROM STRIPE ─────────────────────────────────────────────
+(function checkUpgradeReturn() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('upgrade') === 'success') {
+        // Clean URL without reloading
+        history.replaceState({}, '', window.location.pathname);
+        // Show success banner
+        const banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#00e676;color:#000;font-weight:700;padding:12px 28px;border-radius:30px;z-index:9999;font-size:14px;box-shadow:0 4px 20px rgba(0,230,118,0.4);animation:slideIn 0.4s ease';
+        banner.textContent = '🎉 You\'re now Pro! Welcome to KryptoInsides Pro.';
+        document.body.appendChild(banner);
+        setTimeout(() => banner.remove(), 5000);
+    } else if (params.get('upgrade') === 'cancelled') {
+        history.replaceState({}, '', window.location.pathname);
+    }
+})();
 
 // ── MOBILE ────────────────────────────────────────────────────────────────
 function setMNav(id) {
@@ -1622,6 +1763,142 @@ renderAccountList();
 renderKeywordList();
 renderTelegramUI();
 connect();
+
+// ── HELP & FEEDBACK MODAL ─────────────────────────────────────────────────
+function showHelpModal() { document.getElementById('helpModal').classList.add('show'); }
+function hideHelpModal() { document.getElementById('helpModal').classList.remove('show'); }
+
+function switchHelpTab(tab) {
+    const isHelp = tab === 'help';
+    document.getElementById('htabHelpContent').style.display = isHelp ? 'block' : 'none';
+    document.getElementById('htabFeedbackContent').style.display = isHelp ? 'none' : 'block';
+    const hBtn = document.getElementById('htabHelp');
+    const fBtn = document.getElementById('htabFeedback');
+    hBtn.style.borderColor = isHelp ? 'var(--accent)' : 'var(--border)';
+    hBtn.style.background  = isHelp ? 'var(--accent-dim)' : 'var(--surface2)';
+    hBtn.style.color       = isHelp ? 'var(--accent)' : 'var(--text-muted)';
+    fBtn.style.borderColor = isHelp ? 'var(--border)' : 'var(--accent)';
+    fBtn.style.background  = isHelp ? 'var(--surface2)' : 'var(--accent-dim)';
+    fBtn.style.color       = isHelp ? 'var(--text-muted)' : 'var(--accent)';
+}
+
+function toggleFaq(el) {
+    const answer = el.nextElementSibling;
+    if (!answer) return;
+    const open = answer.style.display === 'block';
+    answer.style.display = open ? 'none' : 'block';
+    el.querySelector('span').textContent = open ? '+' : '−';
+}
+
+let _rating = 0;
+function setRating(n) {
+    _rating = n;
+    document.querySelectorAll('#starRow .star').forEach((s, i) => {
+        s.classList.toggle('active', i < n);
+    });
+}
+
+let _fcat = [];
+function toggleFcat(el) {
+    el.classList.toggle('selected');
+    _fcat = Array.from(document.querySelectorAll('#fcatRow .fcat.selected')).map(e => e.textContent.trim());
+}
+
+function submitFeedback() {
+    const text = (document.getElementById('feedbackText').value || '').trim();
+    const email = (document.getElementById('feedbackEmail').value || '').trim();
+    const btn = document.getElementById('feedbackBtn');
+    const status = document.getElementById('feedbackStatus');
+
+    if (!text && _rating === 0) {
+        status.style.display = 'block';
+        status.style.color = 'var(--danger)';
+        status.textContent = 'Please leave a rating or write something first.';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    status.style.display = 'none';
+
+    // Build mailto as fallback (no backend endpoint needed)
+    const subject = encodeURIComponent('KryptoInsides Feedback' + (_fcat.length ? ' — ' + _fcat.join(', ') : ''));
+    const body = encodeURIComponent(
+        'Rating: ' + (_rating ? '⭐'.repeat(_rating) + ' (' + _rating + '/5)' : 'Not rated') + '
+' +
+        'Categories: ' + (_fcat.join(', ') || 'None') + '
+
+' +
+        'Message:
+' + (text || '(none)') + '
+
+' +
+        'Reply to: ' + (email || '(not provided)')
+    );
+
+    // Try /api/feedback endpoint first (if it exists), fallback to mailto
+    fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating: _rating, categories: _fcat, message: text, email, plan: isPro ? 'pro' : 'free' })
+    })
+    .then(r => r.ok ? r.json() : Promise.reject('no-endpoint'))
+    .then(() => {
+        _showFeedbackSuccess();
+    })
+    .catch(() => {
+        // Fallback: open mailto — always works, no backend needed
+        window.open('mailto:info@kryptoinsides.com?subject=' + subject + '&body=' + body);
+        _showFeedbackSuccess();
+    });
+
+    function _showFeedbackSuccess() {
+        btn.disabled = false;
+        btn.textContent = 'Send Feedback →';
+        status.style.display = 'block';
+        status.style.color = 'var(--accent)';
+        status.textContent = '✅ Feedback sent! Thank you — we read every message.';
+        document.getElementById('feedbackText').value = '';
+        document.getElementById('feedbackEmail').value = '';
+        _rating = 0;
+        _fcat = [];
+        document.querySelectorAll('#starRow .star').forEach(s => s.classList.remove('active'));
+        document.querySelectorAll('#fcatRow .fcat').forEach((s, i) => s.classList.toggle('selected', i === 0));
+        setTimeout(() => hideHelpModal(), 2500);
+    }
+}
+
+// ── CANCEL PLAN ────────────────────────────────────────────────────────────
+function handleCancelPlan() {
+    const confirmed = confirm('Cancel your KryptoInsides Pro subscription?
+
+This will email info@kryptoinsides.com — we'll process your cancellation within 24 hours.');
+    if (!confirmed) return;
+    const subject = encodeURIComponent('Cancel My KryptoInsides Pro Subscription');
+    const body = encodeURIComponent('Hi,
+
+I would like to cancel my KryptoInsides Pro subscription.
+
+Plan: ' + (selectedPlan === 'annual' ? 'Annual' : 'Monthly') + '
+Email: (the email I signed up with)
+
+Please confirm once done.
+
+Thanks.');
+    window.open('mailto:info@kryptoinsides.com?subject=' + subject + '&body=' + body);
+}
+
+// Show cancel link when user is Pro (called after isPro is confirmed)
+function _updateProUI() {
+    const cancelLink = document.getElementById('cancelPlanLink');
+    if (cancelLink) cancelLink.style.display = isPro ? 'block' : 'none';
+    const ub = document.querySelector('.upgrade-badge');
+    if (isPro && ub) {
+        ub.textContent = '⭐ Pro';
+        ub.style.background = 'var(--purple)';
+        ub.onclick = () => { selectedPlan = 'annual'; showProModal(); }; // Pro users can still open modal to see cancel
+    }
+}
 
 // ── TELEGRAM CTA TRACKING — spec §3.5 ────────────────────────────────────
 function trackTelegramClick() {
