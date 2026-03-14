@@ -6,6 +6,9 @@
     <title>KryptoInsides Dashboard — Live Crypto Feed, Alerts & Tweet Tracker</title>
     <meta name="description" content="Your real-time crypto intelligence dashboard. Monitor live tweets, breaking news, whale alerts and keyword tracking — all in one place.">
     <meta name="robots" content="noindex, nofollow">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <meta name="theme-color" content="#00ffb3">
     <link rel="canonical" href="https://kryptoinsides.com/dashboard">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -120,8 +123,7 @@
         .kw-highlight { background: rgba(168,85,247,0.15); color: var(--purple); font-weight: 700; border-radius: 3px; padding: 0 2px; }
 
         /* NEWS CARD — same as before */
-        .news-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 13px; margin-bottom: 9px; transition: all 0.15s; cursor: pointer; animation: slideIn 0.15s ease; }
-        .news-card.no-anim { animation: none !important; }
+        .news-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 13px; margin-bottom: 9px; transition: all 0.15s; cursor: pointer; animation: slideIn 0.3s ease; }
         .news-card:hover { border-color: var(--border-dark); box-shadow: var(--shadow); }
         .news-card.breaking { border-left: 3px solid var(--danger); }
         .news-source { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 11px; }
@@ -954,16 +956,17 @@ function startTweetDrip() {
     }, 280);
 }
 
-// NEWS batch render — dumps all at once via rAF, no drip delay
+// NEWS drip: 1 every 1500ms on login load (calm, readable pace)
 function startNewsDrip() {
-    if (_newsQueue.length === 0) return;
-    const items = _newsQueue.splice(0);
-    function renderChunk() {
-        const chunk = items.splice(0, 20);
-        for (const item of chunk) _insertNews(item, true); // true = no-anim flag
-        if (items.length > 0) requestAnimationFrame(renderChunk);
-    }
-    requestAnimationFrame(renderChunk);
+    if (_newsDripTimer) return;
+    _newsDripTimer = setInterval(() => {
+        if (_newsQueue.length === 0) {
+            clearInterval(_newsDripTimer);
+            _newsDripTimer = null;
+            return;
+        }
+        _insertNews(_newsQueue.shift());
+    }, 1500);
 }
 
 function handleBatchStart(data) {
@@ -1188,10 +1191,10 @@ function handleNews(data) {
         _liveNewsBuffer = [];
 
         for (const item of sorted) _insertNews(item);
-    }, 50);
+    }, 500);
 }
 
-function _insertNews(data, noAnim) {
+function _insertNews(data) {
     const scroll = document.getElementById('newsScroll');
     const skel2 = document.getElementById('newsSkeleton');
     if (skel2) skel2.remove();
@@ -1212,7 +1215,7 @@ function _insertNews(data, noAnim) {
         ${data.snippet?`<div class="news-snippet">${esc(data.snippet)}</div>`:''}
         ${tags?`<div class="news-tags">${tags}</div>`:''}`;
     card.addEventListener('click', () => { if(data.url) window.open(data.url,'_blank'); });
-    if (noAnim) card.classList.add('no-anim');
+    card.classList.add('pop-in');
     scroll.insertBefore(card, scroll.firstChild);
     newsCount++;
     document.getElementById('newsCount').textContent = newsCount + (newsCount === 1 ? ' article' : ' articles');
