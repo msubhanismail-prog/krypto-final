@@ -103,7 +103,7 @@
         .tweet-card.kw-match { border-left: 3px solid var(--purple); }
         @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
         @keyframes loginPop { 0%{opacity:0;transform:translateY(14px) scale(0.97)} 60%{transform:translateY(-3px) scale(1.005)} 100%{opacity:1;transform:translateY(0) scale(1)} }
-        .tweet-card.login-pop { animation: loginPop 0.18s ease-out both; }
+        .tweet-card.login-pop { animation: loginPop 0.42s cubic-bezier(0.34,1.56,0.64,1) both; }
         .tweet-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
         .tweet-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
         .tweet-info { flex: 1; min-width: 0; }
@@ -120,7 +120,8 @@
         .kw-highlight { background: rgba(168,85,247,0.15); color: var(--purple); font-weight: 700; border-radius: 3px; padding: 0 2px; }
 
         /* NEWS CARD — same as before */
-        .news-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 13px; margin-bottom: 9px; transition: all 0.15s; cursor: pointer; animation: slideIn 0.3s ease; }
+        .news-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 13px; margin-bottom: 9px; transition: all 0.15s; cursor: pointer; animation: slideIn 0.15s ease; }
+        .news-card.no-anim { animation: none !important; }
         .news-card:hover { border-color: var(--border-dark); box-shadow: var(--shadow); }
         .news-card.breaking { border-left: 3px solid var(--danger); }
         .news-source { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 11px; }
@@ -141,7 +142,7 @@
             padding: 13px 14px 11px;
             margin-bottom: 9px;
             cursor: default;
-            animation: slideIn 0.15s ease;
+            animation: slideIn 0.35s ease;
             position: relative;
             overflow: hidden;
         }
@@ -937,28 +938,29 @@ let _newsQueue     = [];
 let _tweetDripTimer = null;
 let _newsDripTimer  = null;
 
-// Instant batch render — dumps all queued items in rAF chunks (no drip delay)
+// TWEET drip: 1 every 280ms on login load (smooth but fast)
 let _tweetDripIndex = 0;
 function startTweetDrip() {
-    if (_tweetQueue.length === 0) return;
-    const items = _tweetQueue.splice(0);  // take all at once
+    if (_tweetDripTimer) return;
     _tweetDripIndex = 0;
-    function renderChunk() {
-        const chunk = items.splice(0, 20);  // 20 per frame
-        for (const item of chunk) {
-            _insertTweet(item, false, _tweetDripIndex++);
+    _tweetDripTimer = setInterval(() => {
+        if (_tweetQueue.length === 0) {
+            clearInterval(_tweetDripTimer);
+            _tweetDripTimer = null;
+            _tweetDripIndex = 0;
+            return;
         }
-        if (items.length > 0) requestAnimationFrame(renderChunk);
-    }
-    requestAnimationFrame(renderChunk);
+        _insertTweet(_tweetQueue.shift(), false, _tweetDripIndex++); // pass index for stagger
+    }, 280);
 }
 
+// NEWS batch render — dumps all at once via rAF, no drip delay
 function startNewsDrip() {
     if (_newsQueue.length === 0) return;
-    const items = _newsQueue.splice(0);  // take all at once
+    const items = _newsQueue.splice(0);
     function renderChunk() {
-        const chunk = items.splice(0, 20);  // 20 per frame
-        for (const item of chunk) _insertNews(item);
+        const chunk = items.splice(0, 20);
+        for (const item of chunk) _insertNews(item, true); // true = no-anim flag
         if (items.length > 0) requestAnimationFrame(renderChunk);
     }
     requestAnimationFrame(renderChunk);
@@ -1007,9 +1009,11 @@ function handleBatchEnd() {
     _tweetQueue = [...freshTweets];
     _newsQueue  = [...freshNews];
 
-    // Render immediately — no artificial delay
-    startTweetDrip();
-    startNewsDrip();
+    // Small delay before drip starts — let page settle after connect
+    setTimeout(() => {
+        startTweetDrip();
+        startNewsDrip();
+    }, 400);
 
     console.log(`[Feed] ready in ${(loadMs/1000).toFixed(2)}s | ${freshTweets.length} tweets → drip | ${freshNews.length} news → drip`);
 
@@ -1054,7 +1058,7 @@ function _insertTweet(data, _unused, dripIndex) {
     // Live tweets: instant slideIn (no delay, no bounce — feels real-time)
     if (typeof dripIndex === 'number') {
         card.classList.add('login-pop');
-        card.style.animationDelay = '0ms';  // no stagger — render instantly
+        card.style.animationDelay = (dripIndex * 35) + 'ms';
     } else {
         card.classList.add('slideIn');
     }
@@ -1184,10 +1188,10 @@ function handleNews(data) {
         _liveNewsBuffer = [];
 
         for (const item of sorted) _insertNews(item);
-    }, 500);
+    }, 50);
 }
 
-function _insertNews(data) {
+function _insertNews(data, noAnim) {
     const scroll = document.getElementById('newsScroll');
     const skel2 = document.getElementById('newsSkeleton');
     if (skel2) skel2.remove();
@@ -1208,7 +1212,7 @@ function _insertNews(data) {
         ${data.snippet?`<div class="news-snippet">${esc(data.snippet)}</div>`:''}
         ${tags?`<div class="news-tags">${tags}</div>`:''}`;
     card.addEventListener('click', () => { if(data.url) window.open(data.url,'_blank'); });
-    card.classList.add('pop-in');
+    if (noAnim) card.classList.add('no-anim');
     scroll.insertBefore(card, scroll.firstChild);
     newsCount++;
     document.getElementById('newsCount').textContent = newsCount + (newsCount === 1 ? ' article' : ' articles');
