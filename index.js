@@ -131,13 +131,7 @@ app.use(express.static(path.join(__dirname)));  // serve from root — landing.h
 
 // Explicit routes so / and /dashboard always resolve
 app.get('/', (req, res) => {
-  const fs = require('fs');
-  // Try landing.html first, then dashboard.html
-  const landing   = path.join(__dirname, 'landing.html');
-  const dashboard = path.join(__dirname, 'dashboard.html');
-  if (fs.existsSync(landing))        return res.sendFile(landing);
-  if (fs.existsSync(dashboard))      return res.sendFile(dashboard);
-  res.status(404).send('Site files not found. Please check deployment.');
+  res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
 app.get('/dashboard.html', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
@@ -151,20 +145,55 @@ const wss    = new WebSocket.Server({ server });
 // All users see the EXACT same feed regardless of when they connected
 // ─────────────────────────────────────────────────────────────────────────────
 const feed     = [];   // unified: tweet | news | price_alert, newest first
-const MAX_FEED = 200;  // max items in memory
+
+// ── FEED PERSISTENCE — survives server restarts ───────────────────────────
+const FEED_CACHE_FILE = path.join(__dirname, 'feed_cache.json');
+
+function loadFeedCache() {
+  try {
+    if (require('fs').existsSync(FEED_CACHE_FILE)) {
+      const data = JSON.parse(require('fs').readFileSync(FEED_CACHE_FILE, 'utf8'));
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const fresh = data.filter(item => {
+        const ts = item.createdAt || item.publishedAt || item.timestamp;
+        return ts && new Date(ts).getTime() > cutoff;
+      });
+      feed.push(...fresh);
+      console.log('[Feed] Loaded ' + feed.length + ' cached items from disk');
+    }
+  } catch(e) { console.warn('[Feed] Cache load failed:', e.message); }
+}
+
+setInterval(() => {
+  try {
+    require('fs').writeFileSync(FEED_CACHE_FILE, JSON.stringify(feed));
+  } catch(e) { console.warn('[Feed] Cache save failed:', e.message); }
+}, 2 * 60 * 1000);  // save every 2 minutes
+
+loadFeedCache();
+
+// Save cache immediately after startup polling fills the feed
+setTimeout(() => {
+  try {
+    require('fs').writeFileSync(FEED_CACHE_FILE, JSON.stringify(feed));
+    console.log('[Feed] Initial cache saved — ' + feed.length + ' items');
+  } catch(e) { console.warn('[Feed] Initial save failed:', e.message); }
+}, 60000);  // wait 60s for startup polling to complete first
+
+const MAX_FEED = 2000;  // 24h worth of content
 
 // How long each type stays "fresh" (used for initial-load filtering)
 const FRESH_WINDOW = {
-  tweet:       30 * 60 * 1000,  // 30 min — show last 30 min of tweets on login
-  news:        35 * 60 * 1000,  // 35 min
-  price_alert: 35 * 60 * 1000,  // 35 min — new users still see recent alerts
+  tweet:       24 * 60 * 60 * 1000,  // 24 hours
+  news:        24 * 60 * 60 * 1000,  // 24 hours
+  price_alert: 24 * 60 * 60 * 1000,  // 24 hours
 };
 
 // How many of each type to send to a new connection (prevents flooding)
 const LOGIN_CAP = {
-  tweet:       20,  // up to 20 recent tweets on login
-  news:        25,
-  price_alert: 10,
+  tweet:       200,  // up to 200 tweets on login (24h)
+  news:        100,
+  price_alert: 50,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
