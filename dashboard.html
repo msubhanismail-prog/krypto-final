@@ -564,7 +564,7 @@
                         </div>
                         <span class="panel-count" id="newsCount"></span>
                     </div>
-                    <p id="newsWindowLabel">Latest from 25+ sources · last 24 hours</p>
+                    <p id="newsWindowLabel">Latest from 20+ sources · last 24 hours</p>
                 </div>
                 <div class="panel-scroll" id="newsScroll">
                     <div class="telegram-invite">
@@ -950,7 +950,7 @@ function startTweetDrip() {
             return;
         }
         _insertTweet(_tweetQueue.shift(), false, _tweetDripIndex++); // pass index for stagger
-    }, 280);
+    }, 30);
 }
 
 // NEWS drip: 1 every 1500ms on login load (calm, readable pace)
@@ -963,7 +963,7 @@ function startNewsDrip() {
             return;
         }
         _insertNews(_newsQueue.shift());
-    }, 1500);
+    }, 50);
 }
 
 function handleBatchStart(data) {
@@ -996,7 +996,7 @@ function handleBatchEnd() {
         .slice(-200); // newest 200 max — matches server LOGIN_CAP
 
     // ── NEWS + PRICE ALERTS ─────────────────────────────────────────────
-    // Server enforces 24h window. Sort oldest→newest for drip.
+    // Server enforces 35-min window — trust it. Sort oldest→newest for drip.
     const freshNews = _batchNews
         .sort((a, b) => {
             const ta = new Date(a.publishedAt || a.timestamp || 0);
@@ -1009,11 +1009,8 @@ function handleBatchEnd() {
     _tweetQueue = [...freshTweets];
     _newsQueue  = [...freshNews];
 
-    // Small delay before drip starts — let page settle after connect
-    setTimeout(() => {
-        startTweetDrip();
-        startNewsDrip();
-    }, 400);
+    startTweetDrip();
+    startNewsDrip();
 
     console.log(`[Feed] ready in ${(loadMs/1000).toFixed(2)}s | ${freshTweets.length} tweets → drip | ${freshNews.length} news → drip`);
 
@@ -1058,7 +1055,7 @@ function _insertTweet(data, _unused, dripIndex) {
     // Live tweets: instant slideIn (no delay, no bounce — feels real-time)
     if (typeof dripIndex === 'number') {
         card.classList.add('login-pop');
-        card.style.animationDelay = (dripIndex * 35) + 'ms';
+        card.style.animationDelay = '0ms';
     } else {
         card.classList.add('slideIn');
     }
