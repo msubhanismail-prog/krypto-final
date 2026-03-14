@@ -551,7 +551,7 @@
                     </div>
                     <div class="empty-state" id="feedEmpty" style="display:none;">
                         <div class="icon">⚡</div>
-                        <p>No tweets in the last 30 min.<br>Live updates will appear here instantly.</p>
+                        <p>No tweets in the last 24 hours.<br>Live updates will appear here instantly.</p>
                     </div>
                 </div>
             </div>
@@ -564,7 +564,7 @@
                         </div>
                         <span class="panel-count" id="newsCount"></span>
                     </div>
-                    <p id="newsWindowLabel">Latest from 20+ sources · last 45 min</p>
+                    <p id="newsWindowLabel">Latest from 25+ sources · last 24 hours</p>
                 </div>
                 <div class="panel-scroll" id="newsScroll">
                     <div class="telegram-invite">
@@ -833,7 +833,7 @@
 
 <script>
 let ws, tweetCount = 0, newsCount = 0, customCount = 0, kwMatchCount = 0;
-const MAX_CARDS = 150;
+const MAX_CARDS = 500;
 const FREE_LIMIT = 3;
 let isPro = false;
 let selectedPlan = 'annual';
@@ -993,17 +993,17 @@ function handleBatchEnd() {
     // Just sort oldest→newest and cap so user isn't flooded.
     const freshTweets = _batchTweets
         .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
-        .slice(-20); // newest 20 max — matches server LOGIN_CAP
+        .slice(-200); // newest 200 max — matches server LOGIN_CAP
 
     // ── NEWS + PRICE ALERTS ─────────────────────────────────────────────
-    // Server enforces 35-min window — trust it. Sort oldest→newest for drip.
+    // Server enforces 24h window. Sort oldest→newest for drip.
     const freshNews = _batchNews
         .sort((a, b) => {
             const ta = new Date(a.publishedAt || a.timestamp || 0);
             const tb = new Date(b.publishedAt || b.timestamp || 0);
             return ta - tb; // oldest first
         })
-        .slice(-35); // max 35 combined items on login
+        .slice(-100); // max 100 combined items on login (24h)
 
     // Queue both drips — they run independently, neither blocks the other
     _tweetQueue = [...freshTweets];
@@ -1683,18 +1683,18 @@ function trackTelegramClick() {
             <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px;">
                 <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Common Questions</div>
                 <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">Why aren't tweets showing? <span style="float:right;color:var(--text-muted);">+</span></div>
-                <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">The feed loads the last 30 minutes on login. If blank, refresh the page. The status dot (top left) should be green when connected.</div>
+                <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">The feed loads the last 24 hours on login. If blank, refresh the page. The status dot (top left) should be green when connected.</div>
                 <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">How do I get Telegram alerts? <span style="float:right;color:var(--text-muted);">+</span></div>
                 <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">Go to the Telegram tab → search @kryptoinsidesbot → send /start → paste your Chat ID.</div>
                 <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">How do I cancel my Pro plan? <span style="float:right;color:var(--text-muted);">+</span></div>
-                <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">Email <a href="mailto:info@kryptoinsides.com" style="color:var(--accent);">info@kryptoinsides.com</a> — we cancel within 24 hours. No questions asked.</div>
+                <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">Email <a href="/cdn-cgi/l/email-protection#026b6c646d4269707b72766d6b6c716b6667712c616d6f" style="color:var(--accent);"><span class="__cf_email__" data-cfemail="b4dddad2dbf4dfc6cdc4c0dbdddac7ddd0d1c79ad7dbd9">[email&#160;protected]</span></a> — we cancel within 24 hours. No questions asked.</div>
                 <div onclick="toggleFaq(this)" style="cursor:pointer;padding:8px 0;font-size:13px;font-weight:600;">What accounts does KryptoInsides track? <span style="float:right;color:var(--text-muted);">+</span></div>
                 <div style="display:none;font-size:12px;color:var(--text-secondary);padding:8px 0 4px;line-height:1.6;">64 curated crypto accounts — whales, top traders, founders, news sources. Add your own in My Tracking.</div>
             </div>
             <div style="background:var(--accent-dim);border:1px solid rgba(0,184,148,0.2);border-radius:14px;padding:14px;text-align:center;">
                 <div style="font-size:13px;font-weight:700;margin-bottom:4px;">Still need help?</div>
                 <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">We typically reply within a few hours.</div>
-                <a href="mailto:info@kryptoinsides.com?subject=KryptoInsides Help" style="display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:white;padding:9px 20px;border-radius:30px;font-weight:700;font-size:13px;text-decoration:none;">✉️ Email Support</a>
+                <a href="/cdn-cgi/l/email-protection#e0898e868fa08b929990948f898e9389848593ce838f8ddf9395828a858394ddab929990948fa98e9389848593c0a8858c90" style="display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:white;padding:9px 20px;border-radius:30px;font-weight:700;font-size:13px;text-decoration:none;">✉️ Email Support</a>
             </div>
         </div>
         <div id="htabFeedbackContent" style="display:none;">
@@ -1722,7 +1722,7 @@ function trackTelegramClick() {
     </div>
 </div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 function showHelpModal() { document.getElementById('helpModal').classList.add('show'); }
 function hideHelpModal() { document.getElementById('helpModal').classList.remove('show'); }
 function switchHelpTab(tab) {
@@ -1765,12 +1765,4 @@ function submitFeedback() {
     btn.disabled = true; btn.textContent = 'Sending…'; status.style.display = 'none';
     const subj = encodeURIComponent('KryptoInsides Feedback' + (_fcat.length ? ' — ' + _fcat.join(', ') : ''));
     const body = encodeURIComponent('Rating: ' + (_rating ? '⭐'.repeat(_rating) + ' (' + _rating + '/5)' : 'Not rated') + '\nCategories: ' + (_fcat.join(', ') || 'None') + '\n\nMessage:\n' + (text || '(none)') + '\n\nReply to: ' + (email || '(not provided)'));
-    window.open('mailto:info@kryptoinsides.com?subject=' + subj + '&body=' + body);
-    btn.disabled = false; btn.textContent = 'Send Feedback →';
-    status.style.display = 'block'; status.style.color = 'var(--accent)';
-    status.textContent = '✅ Email client opened — hit Send! Thank you.';
-    setTimeout(() => hideHelpModal(), 3000);
-}
-</script>
-</body>
-</html>
+    window.open('mailto:info@kryptoinsides.com?subject=' + su
