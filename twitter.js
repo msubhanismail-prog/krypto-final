@@ -241,7 +241,7 @@ function startPollingEngine() {
     }, 3 * 60 * 1000);
 
     console.log('Live polling started: interval ' + (interval/1000).toFixed(1) + 's per account');
-  }, 30000);
+  }, 35000);
 }
 
 async function startTwitterPolling(broadcast) {
