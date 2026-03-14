@@ -12,8 +12,8 @@
  * Broadcasting oldest first means the newest article ends up on top after all
  * insertions — which is the correct display order.
  *
- * Startup backfill: accepts articles ≤ 24 hours old
- * Live polls:       accepts articles ≤ 24 hours old
+ * Startup backfill: accepts articles ≤ 45 min old (some context on load)
+ * Live polls:       accepts articles ≤ 30 min old (fresh only)
  */
 
 'use strict';
@@ -248,10 +248,10 @@ function startNewsPolling(broadcast) {
   broadcastFn = broadcast;
   console.log(`[News] Starting — ${NEWS_FEEDS.length} sources configured`);
 
-  // Startup backfill — all feeds, allow ≤24h articles
+  // Startup backfill — all feeds, allow ≤45min articles
   runCycle(NEWS_FEEDS, 'startup backfill').then(() => {
     isFirstPoll = false;
-    console.log('[News] Live mode — articles ≤24h only, ordered by publish time');
+    console.log('[News] Live mode — articles ≤30min only, ordered by publish time');
   });
 
   // Priority feeds every 2 min
