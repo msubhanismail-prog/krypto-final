@@ -145,41 +145,92 @@ const wss    = new WebSocket.Server({ server });
 // All users see the EXACT same feed regardless of when they connected
 // ─────────────────────────────────────────────────────────────────────────────
 const feed     = [];   // unified: tweet | news | price_alert, newest first
-
-// ── FEED PERSISTENCE — survives server restarts ───────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED FEED CACHE — one instance, all users
+// ─────────────────────────────────────────────────────────────────────────────
+// Twitter/news poll ONCE → items enter feed[] → served to every user.
+// Zero per-user API calls. Zero per-user polling. Cost stays flat.
+//
+// On restart: feed_cache.json loads 24h of data instantly.
+// New items: appended to feed[], snapshot invalidated, next connect rebuilds.
+// ─────────────────────────────────────────────────────────────────────────────
+const fs_mod          = require('fs');
 const FEED_CACHE_FILE = path.join(__dirname, 'feed_cache.json');
 
 function loadFeedCache() {
   try {
-    if (require('fs').existsSync(FEED_CACHE_FILE)) {
-      const data = JSON.parse(require('fs').readFileSync(FEED_CACHE_FILE, 'utf8'));
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      const fresh = data.filter(item => {
-        const ts = item.createdAt || item.publishedAt || item.timestamp;
-        return ts && new Date(ts).getTime() > cutoff;
-      });
-      feed.push(...fresh);
-      console.log('[Feed] Loaded ' + feed.length + ' cached items from disk');
-    }
+    if (!fs_mod.existsSync(FEED_CACHE_FILE)) return;
+    const raw    = fs_mod.readFileSync(FEED_CACHE_FILE, 'utf8');
+    const data   = JSON.parse(raw);
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const fresh  = data.filter(item => {
+      const ts = item.createdAt || item.publishedAt || item.timestamp;
+      return ts && new Date(ts).getTime() > cutoff;
+    });
+    feed.push(...fresh);
+    // Sort newest-first after bulk load
+    feed.sort((a, b) => {
+      const ta = new Date(a.createdAt || a.publishedAt || a.timestamp || 0).getTime();
+      const tb = new Date(b.createdAt || b.publishedAt || b.timestamp || 0).getTime();
+      return tb - ta;
+    });
+    _snapshotDirty = true;
+    console.log('[Feed] Loaded ' + feed.length + ' items from disk cache');
   } catch(e) { console.warn('[Feed] Cache load failed:', e.message); }
 }
 
+// Batched write — max once per 5s so rapid-fire broadcasts don't hammer disk
+let _savePending = false;
+function scheduleSave() {
+  if (_savePending) return;
+  _savePending = true;
+  setTimeout(() => {
+    _savePending = false;
+    try { fs_mod.writeFileSync(FEED_CACHE_FILE, JSON.stringify(feed)); }
+    catch(e) { console.warn('[Feed] Save failed:', e.message); }
+  }, 5000);
+}
+// Also flush every 60s unconditionally
 setInterval(() => {
-  try {
-    require('fs').writeFileSync(FEED_CACHE_FILE, JSON.stringify(feed));
-  } catch(e) { console.warn('[Feed] Cache save failed:', e.message); }
-}, 2 * 60 * 1000);  // save every 2 minutes
+  try { fs_mod.writeFileSync(FEED_CACHE_FILE, JSON.stringify(feed)); } catch(e) {}
+}, 60 * 1000);
+
+// ── PRE-SERIALIZED SNAPSHOT ────────────────────────────────────────────────
+// Serialized ONCE when feed changes — reused for every connecting user.
+// Without this: 1000 users login → 1000 × JSON.stringify(2000 items).
+// With this:    1000 users login → 1 × JSON.stringify, 1000 × ws.send(string).
+let _snapshotDirty = true;
+let _snapshotStrs  = [];    // pre-serialized item strings
+let _snapshotMeta  = { tweetCount: 0, newsCount: 0, total: 0 };
+
+function buildSnapshot() {
+  if (!_snapshotDirty) return;   // already up to date
+  _snapshotDirty = false;
+  const now    = Date.now();
+  const counts = { tweet: 0, news: 0, price_alert: 0 };
+  const items  = feed
+    .filter(item => {
+      const ts  = item.createdAt || item.publishedAt || item.timestamp;
+      const win = FRESH_WINDOW[item.type] || FRESH_WINDOW.news;
+      if (!ts || (now - new Date(ts).getTime()) > win) return false;
+      const cap = LOGIN_CAP[item.type] || 20;
+      if (counts[item.type] >= cap) return false;
+      counts[item.type]++;
+      return true;
+    })
+    .reverse();  // oldest first → client inserts newest-on-top
+
+  _snapshotStrs = items.map(i => JSON.stringify(i));  // serialize ONCE here
+  _snapshotMeta = {
+    tweetCount: counts.tweet,
+    newsCount:  counts.news + counts.price_alert,
+    total:      items.length,
+  };
+  console.log('[Feed] Snapshot rebuilt: ' + items.length + ' items (' +
+    counts.tweet + ' tweets, ' + (counts.news + counts.price_alert) + ' news/alerts)');
+}
 
 loadFeedCache();
-
-// Save cache immediately after startup polling fills the feed
-setTimeout(() => {
-  try {
-    require('fs').writeFileSync(FEED_CACHE_FILE, JSON.stringify(feed));
-    console.log('[Feed] Initial cache saved — ' + feed.length + ' items');
-  } catch(e) { console.warn('[Feed] Initial save failed:', e.message); }
-}, 60000);  // wait 60s for startup polling to complete first
-
 const MAX_FEED = 2000;  // 24h worth of content
 
 // How long each type stays "fresh" (used for initial-load filtering)
@@ -252,52 +303,33 @@ wss.on('connection', (ws, req) => {
   ws.on('message', () => {});
   clients.add(ws);
 
-  const now = Date.now();
+  // Serve the pre-serialized shared snapshot — built once, reused for every user.
+  // No per-user filtering, no per-user JSON.stringify, no per-user API calls.
+  buildSnapshot();
 
-  // Build the snapshot: filter by freshness, cap per type, oldest→newest for drip
-  const counts = { tweet: 0, news: 0, price_alert: 0 };
-  const snapshot = feed
-    .filter(item => {
-      const ts  = item.createdAt || item.publishedAt || item.timestamp;
-      const win = FRESH_WINDOW[item.type] || FRESH_WINDOW.news;
-      if (!ts || (now - new Date(ts).getTime()) > win) return false;
-      const cap = LOGIN_CAP[item.type] || 20;
-      if (counts[item.type] >= cap) return false;
-      counts[item.type]++;
-      return true;
-    })
-    .reverse();  // oldest first — client drips newest to top in order
+  if (_snapshotStrs.length === 0) {
+    ws.send(JSON.stringify({ type: 'batch_start', tweetCount: 0, newsCount: 0, total: 0 }));
+    ws.send(JSON.stringify({ type: 'batch_end' }));
+    return;
+  }
 
-  // Mark snapshot IDs as seen so reconnects don't re-show same items
-  snapshot.forEach(item => {
-    const id = item.id || item.tweetId;
-    if (id) ws._seen.add(id);
-  });
+  ws.send(JSON.stringify({ type: 'batch_start', ..._snapshotMeta }));
 
-  // Tell client how many items to expect
-  ws.send(JSON.stringify({
-    type:       'batch_start',
-    tweetCount: counts.tweet,
-    newsCount:  counts.news + counts.price_alert,
-    total:      snapshot.length,
-  }));
-
-  // Stream snapshot in chunks of 5 using setImmediate — non-blocking
-  // 1000 users connecting simultaneously won't freeze the server
+  // Stream in chunks of 10 — non-blocking, won't freeze server under load
   let i = 0;
+  const strs = _snapshotStrs;   // local ref so reconnects don't race a rebuild
   function sendNext() {
     if (ws.readyState !== WebSocket.OPEN) return;
-    if (i >= snapshot.length) {
+    if (i >= strs.length) {
       ws.send(JSON.stringify({ type: 'batch_end' }));
       return;
     }
-    const chunk = snapshot.slice(i, i + 5);
-    for (const item of chunk) {
+    const end = Math.min(i + 10, strs.length);
+    for (; i < end; i++) {
       if (ws.readyState !== WebSocket.OPEN) return;
-      try { ws.send(JSON.stringify(item)); } catch { return; }
+      try { ws.send(strs[i]); } catch { return; }  // send pre-built string
     }
-    i += 5;
-    setImmediate(sendNext);  // yield the event loop between chunks
+    setImmediate(sendNext);
   }
   setImmediate(sendNext);
 });
@@ -314,9 +346,11 @@ function broadcast(payload) {
   // Drop stale items before caching (tweets especially age fast)
   if (payload.type === 'tweet' && ts && (now - new Date(ts).getTime()) > win) return;
 
-  // Add to unified feed cache (newest first)
+  // Add to shared feed cache (newest first) — one copy, all users read it
   feed.unshift(payload);
   if (feed.length > MAX_FEED) feed.pop();
+  _snapshotDirty = true;   // rebuild snapshot lazily on next connection
+  scheduleSave();           // persist to disk (batched, max once per 5s)
 
   // Side effects
   if (payload.type === 'tweet') {
@@ -340,11 +374,16 @@ function broadcast(payload) {
 // ─────────────────────────────────────────────────────────────────────────────
 setInterval(() => {
   const now = Date.now();
+  let evicted = 0;
   for (let i = feed.length - 1; i >= 0; i--) {
     const item = feed[i];
     const ts   = item.createdAt || item.publishedAt || item.timestamp;
     const win  = FRESH_WINDOW[item.type] || FRESH_WINDOW.news;
-    if (ts && (now - new Date(ts).getTime()) > win) feed.splice(i, 1);
+    if (ts && (now - new Date(ts).getTime()) > win) { feed.splice(i, 1); evicted++; }
+  }
+  if (evicted > 0) {
+    _snapshotDirty = true;
+    console.log('[Feed] Evicted ' + evicted + ' stale items — ' + feed.length + ' remain');
   }
 }, 10 * 60 * 1000);
 
@@ -620,6 +659,16 @@ server.listen(PORT, async () => {
   try { await startNewsPolling(broadcast); }      catch (e) { console.error('News:',    e.message); }
   try { startPriceAlerts(broadcast); }            catch (e) { console.error('Prices:',  e.message); }
   try { await pollUpdates(); }                    catch (e) { console.error('Telegram:', e.message); }
+
+  // After startup polling fills the feed, save to disk immediately.
+  // On next restart, all 24h of data loads from cache — no API wait.
+  setTimeout(() => {
+    try {
+      fs_mod.writeFileSync(FEED_CACHE_FILE, JSON.stringify(feed));
+      _snapshotDirty = true;
+      console.log('[Feed] Startup save: ' + feed.length + ' items cached — next restart loads instantly');
+    } catch(e) { console.warn('[Feed] Startup save failed:', e.message); }
+  }, 90 * 1000);
 });
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
