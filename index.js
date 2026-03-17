@@ -92,6 +92,7 @@ app.use((req, res, next) => {
 // ── SECURITY + PERFORMANCE HEADERS ───────────────────────────────────────
 app.use((req, res, next) => {
   // Cache static assets aggressively
+const FEED_CACHE_FILE = '/app/data/feed_cache.json';
   if (req.url.match(/\.(css|js|png|jpg|jpeg|gif|ico|woff|woff2|svg)$/)) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   }
@@ -186,9 +187,9 @@ const MAX_FEED = 2000;  // 24h worth of content
 
 // How long each type stays "fresh" (used for initial-load filtering)
 const FRESH_WINDOW = {
-  tweet:       24 * 60 * 60 * 1000,  // 24 hours
-  news:        24 * 60 * 60 * 1000,  // 24 hours
-  price_alert: 24 * 60 * 60 * 1000,  // 24 hours
+  tweet:       12 * 60 * 60 * 1000,  // 12 hours
+  news:        12 * 60 * 60 * 1000,  // 12 hours
+  price_alert: 12 * 60 * 60 * 1000,  // 12 hours
 };
 
 // How many of each type to send to a new connection (prevents flooding)
