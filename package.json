@@ -1,6 +1,6 @@
 {
   "name": "kryptoinsides",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Real-time crypto intelligence feed",
   "main": "index.js",
   "scripts": {
