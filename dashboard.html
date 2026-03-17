@@ -1266,26 +1266,73 @@ function buildKwCard(data, kw) {
 }
 
 // ── ACCOUNT TRACKING ──────────────────────────────────────────────────────
-function addAccount() {
+async function addAccount() {
     let val = document.getElementById('accountInput').value.trim().replace('@','').toLowerCase();
     if (!val) return;
+    if (!/^[a-zA-Z0-9_]{1,15}$/.test(val)) {
+        alert('❌ Invalid username format. Only letters, numbers, and underscores allowed.');
+        return;
+    }
     if (trackedAccounts.includes(val)) { alert('Already tracking @' + val); return; }
     if (!isPro && trackedAccounts.length >= FREE_LIMIT) { showProModal(); return; }
-    trackedAccounts.push(val);
-    store.set('ki_accounts', trackedAccounts);
-    document.getElementById('accountInput').value = '';
-    renderAccountList();
-    // Scan cached tweets immediately
-    allTweets.forEach(t => {
-        if ((t.author?.username||'').toLowerCase() === val) {
+
+    // Show loading state
+    const btn = document.querySelector('.add-btn');
+    const oldText = btn.textContent;
+    btn.textContent = '⏳ Checking...';
+    btn.disabled = true;
+
+    try {
+        const resp = await fetch('/api/validate-account', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handle: val })
+        });
+        const data = await resp.json();
+
+        if (!data.valid) {
+            alert('❌ @' + val + ' — ' + (data.reason || 'Account not found on Twitter/X'));
+            btn.textContent = oldText;
+            btn.disabled = false;
+            return;
+        }
+
+        // Valid account — add it
+        trackedAccounts.push(val);
+        store.set('ki_accounts', trackedAccounts);
+        document.getElementById('accountInput').value = '';
+        renderAccountList();
+
+        // Show tweets from validation response
+        if (data.tweets && data.tweets.length > 0) {
             const ce = document.getElementById('customEmpty');
             if (ce) ce.remove();
             const cs = document.getElementById('customScroll');
-            cs.insertBefore(buildTweetCard(t), cs.firstChild);
-            customCount++;
+            data.tweets.forEach(t => {
+                cs.insertBefore(buildTweetCard(t), cs.firstChild);
+                customCount++;
+            });
             document.getElementById('customCount').textContent = customCount + ' tweets';
         }
-    });
+
+        // Also scan cached tweets
+        allTweets.forEach(t => {
+            if ((t.author?.username||'').toLowerCase() === val) {
+                const ce = document.getElementById('customEmpty');
+                if (ce) ce.remove();
+                const cs = document.getElementById('customScroll');
+                cs.insertBefore(buildTweetCard(t), cs.firstChild);
+                customCount++;
+                document.getElementById('customCount').textContent = customCount + ' tweets';
+            }
+        });
+
+    } catch (err) {
+        alert('❌ Network error — please try again');
+    }
+
+    btn.textContent = oldText;
+    btn.disabled = false;
 }
 
 function removeAccount(handle) {
