@@ -187,9 +187,9 @@ const MAX_FEED = 2000;  // 24h worth of content
 
 // How long each type stays "fresh" (used for initial-load filtering)
 const FRESH_WINDOW = {
-  tweet:       12 * 60 * 60 * 1000,  // 12 hours
-  news:        12 * 60 * 60 * 1000,  // 12 hours
-  price_alert: 12 * 60 * 60 * 1000,  // 12 hours
+  tweet:       24 * 60 * 60 * 1000,  // 24 hours
+  news:        24 * 60 * 60 * 1000,  // 24 hours
+  price_alert: 24 * 60 * 60 * 1000,  // 24 hours
 };
 
 // How many of each type to send to a new connection (prevents flooding)
