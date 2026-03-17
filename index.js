@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const cors      = require('cors');
 const path      = require('path');
 
-const { startTwitterPolling }  = require('./twitter');
+const { startTwitterPolling, validateAndResolveUser, fetchCustomUserTweets }  = require('./twitter');
 const { startPriceAlerts }     = require('./prices');
 const { broadcastToChannel }   = require('./channel');
 const { startNewsPolling }     = require('./news');
@@ -537,6 +537,25 @@ app.get('/api/telegram/status', (req, res) => {
   const { chatId } = req.query;
   const user = getTgUser(chatId);
   res.json({ connected: !!user, user });
+});
+// ── CUSTOM ACCOUNT VALIDATION ─────────────────────────────────────────
+app.post('/api/validate-account', express.json(), async (req, res) => {
+  const { handle } = req.body;
+  if (!handle) return res.status(400).json({ valid: false, reason: 'No username provided' });
+  
+  try {
+    const result = await validateAndResolveUser(handle);
+    if (result.valid) {
+      // Optionally fetch recent tweets
+      const tweets = await fetchCustomUserTweets(handle);
+      return res.json({ valid: true, user: result.user, tweets });
+    } else {
+      return res.json({ valid: false, reason: result.reason });
+    }
+  } catch (err) {
+    console.error('Validate account error:', err.message);
+    return res.json({ valid: false, reason: 'Server error — try again' });
+  }
 });
 
 // ── TELEGRAM DEBUG — restricted to localhost only ────────────────────────
