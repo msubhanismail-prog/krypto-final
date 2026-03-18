@@ -32,8 +32,15 @@ function releaseStartupBuffer() {
 function loadCache() {
   try {
     if (fs.existsSync(ID_CACHE_FILE)) {
-      userIdMap = JSON.parse(fs.readFileSync(ID_CACHE_FILE, 'utf8'));
-      console.log('Loaded ' + Object.keys(userIdMap).length + ' cached user IDs');
+      const raw = JSON.parse(fs.readFileSync(ID_CACHE_FILE, 'utf8'));
+      // ✅ FIX: Only load NON-custom accounts from cache
+      // Custom accounts must always be re-verified via Twitter API on add
+      const filtered = {};
+      for (const [key, val] of Object.entries(raw)) {
+        if (!val.custom) filtered[key] = val;
+      }
+      userIdMap = filtered;
+      console.log('Loaded ' + Object.keys(userIdMap).length + ' cached user IDs (custom accounts excluded)');
       return true;
     }
   } catch (e) { console.error('Cache read error:', e.message); }
@@ -256,38 +263,71 @@ async function startTwitterPolling(broadcast) {
     startPollingEngine();
   } catch (err) {
     console.error('Twitter startup failed (website will still run):', err.message);
-    // App crash nahi hogi — website chalti rahegi
   }
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// VALIDATE AND RESOLVE USER
+// ✅ FIX: Custom accounts are ALWAYS verified via Twitter API — never from cache
+// This prevents fake/invalid usernames from being added
+// ─────────────────────────────────────────────────────────────────────────────
 async function validateAndResolveUser(handle) {
   if (!BEARER) return { valid: false, reason: 'Twitter API not configured' };
+
   const clean = handle.replace('@', '').trim().toLowerCase();
-  if (!clean || !/^[a-zA-Z0-9_]{1,50}$/.test(clean)) {
+
+  // ✅ FIX: Strict Twitter username format — max 15 chars (Twitter's actual limit)
+  if (!clean || !/^[a-zA-Z0-9_]{1,15}$/.test(clean)) {
     return { valid: false, reason: 'Invalid username format' };
   }
-  if (userIdMap[clean]) {
+
+  // ✅ FIX: Pre-approved accounts (non-custom) can use cache
+  // Custom accounts: ALWAYS call Twitter API fresh — no cache shortcut
+  if (userIdMap[clean] && !userIdMap[clean].custom) {
     return { valid: true, user: userIdMap[clean], cached: true };
   }
+
+  // Always hit Twitter API for custom account validation
   try {
     const res = await axios.get('https://api.twitter.com/2/users/by/username/' + clean, {
       headers: { Authorization: 'Bearer ' + BEARER },
       params: { 'user.fields': 'name,username,profile_image_url,description' },
       timeout: 8000
     });
+
     if (res.data && res.data.data) {
       const u = res.data.data;
-      userIdMap[clean] = { id: u.id, name: u.name, username: u.username, category: 'Custom', emoji: '👤', priority: false, custom: true };
+      // Save to map only after confirmed valid by Twitter
+      userIdMap[clean] = {
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        category: 'Custom',
+        emoji: '👤',
+        priority: false,
+        custom: true
+      };
       saveCache();
       return { valid: true, user: userIdMap[clean] };
     }
+
+    // Twitter returned 200 but no data — account doesn't exist
     return { valid: false, reason: 'Account not found on Twitter' };
+
   } catch (err) {
-    if (err.response?.status === 404) return { valid: false, reason: 'Account @' + clean + ' does not exist on Twitter' };
-    if (err.response?.status === 429) return { valid: false, reason: 'Rate limited — please try again in a moment' };
-    return { valid: false, reason: 'Could not verify — check TWITTER_BEARER_TOKEN' };
+    if (err.response?.status === 404) {
+      return { valid: false, reason: 'Account @' + clean + ' does not exist on Twitter' };
+    }
+    if (err.response?.status === 429) {
+      return { valid: false, reason: 'Rate limited — please try again in a moment' };
+    }
+    if (err.response?.status === 403) {
+      return { valid: false, reason: 'Twitter API access error — check Bearer Token' };
+    }
+    console.error('[Twitter] validateAndResolveUser error:', err.message);
+    return { valid: false, reason: 'Could not verify — please try again' };
   }
 }
 
