@@ -138,7 +138,7 @@ const BUILD_VERSION = 'v' + Date.now(); // changes on every server restart
 
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.sendFile(path.join(__dirname, 'dashboard.html'));
+  res.sendFile(path.join(__dirname, 'landing.html'));
 });
 app.get('/dashboard', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
