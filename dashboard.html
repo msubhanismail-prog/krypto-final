@@ -98,15 +98,16 @@
         .panel-scroll::-webkit-scrollbar-thumb { background: var(--border-dark); border-radius: 2px; }
 
         /* TWEET CARD — same as before */
-        .tweet-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 13px; margin-bottom: 9px; transition: all 0.2s; animation: slideIn 0.3s ease; cursor: pointer; }
+        .tweet-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 13px; margin-bottom: 9px; transition: all 0.2s; cursor: pointer; }
+        .tweet-card.slideIn { animation: slideIn 0.3s ease; }
         .tweet-card:hover { border-color: var(--border-dark); box-shadow: var(--shadow); }
         .tweet-card.emergency { border-color: var(--danger); background: rgba(255,107,107,0.04); }
         .tweet-card.emergency::before { content: '🚨 ALERT'; display: block; font-size: 9px; font-weight: 700; color: var(--danger); margin-bottom: 6px; letter-spacing: 0.5px; }
         .tweet-card.priority-high { border-left: 3px solid var(--accent); }
         .tweet-card.kw-match { border-left: 3px solid var(--purple); }
-        @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes loginPop { 0%{opacity:0;transform:translateY(14px) scale(0.97)} 60%{transform:translateY(-3px) scale(1.005)} 100%{opacity:1;transform:translateY(0) scale(1)} }
-        .tweet-card.login-pop { animation: loginPop 0.42s cubic-bezier(0.34,1.56,0.64,1) both; }
+        @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        /* Login batch: no animation — cards appear instantly so feed is never empty */
+        .tweet-card.login-pop { animation: none !important; opacity: 1 !important; }
         .tweet-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
         .tweet-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
         .tweet-info { flex: 1; min-width: 0; }
@@ -123,7 +124,8 @@
         .kw-highlight { background: rgba(168,85,247,0.15); color: var(--purple); font-weight: 700; border-radius: 3px; padding: 0 2px; }
 
         /* NEWS CARD — same as before */
-        .news-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 13px; margin-bottom: 9px; transition: all 0.15s; cursor: pointer; animation: slideIn 0.3s ease; }
+        .news-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 13px; margin-bottom: 9px; transition: all 0.15s; cursor: pointer; }
+        .news-card.live-item { animation: slideIn 0.3s ease; }
         .news-card:hover { border-color: var(--border-dark); box-shadow: var(--shadow); }
         .news-card.breaking { border-left: 3px solid var(--danger); }
         .news-source { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 11px; }
@@ -930,6 +932,7 @@ function connect() {
 // All users see the same feed (server broadcasts identical state)
 
 let _inBatch      = false;
+let _batchRendering = false;
 let _batchTweets  = [];
 let _batchNews    = [];
 let _batchStartTime = 0;
@@ -987,6 +990,7 @@ function handleBatchStart(data) {
 
 function handleBatchEnd() {
     _inBatch = false;
+    const _isLoginRender = true; // flag to suppress animations during instant render
     const loadMs = Date.now() - _batchStartTime;
     const now    = Date.now();
 
@@ -1008,17 +1012,20 @@ function handleBatchEnd() {
         })
         .slice(-100); // max 100 combined items on login (24h)
 
-    // Queue both drips — they run independently, neither blocks the other
-    _tweetQueue = [...freshTweets];
-    _newsQueue  = [...freshNews];
+    // ── INSTANT RENDER — no drip, no delay ──
+    // Render all tweets and news at once so feed is never empty on page load.
+    // Tweets: insert oldest→newest (insertBefore puts newest on top)
+    for (const t of freshTweets) {
+        _insertTweet(t, false, 0); // pass dripIndex=0 so login-pop class is used (CSS disabled animation)
+    }
+    // News: insert oldest→newest — pass _isLoginRender flag
+    _batchRendering = true;
+    for (const n of freshNews) {
+        _insertNews(n);
+    }
+    _batchRendering = false;
 
-    // Small delay before drip starts — let page settle after connect
-    setTimeout(() => {
-        startTweetDrip();
-        startNewsDrip();
-    }, 400);
-
-    console.log(`[Feed] ready in ${(loadMs/1000).toFixed(2)}s | ${freshTweets.length} tweets → drip | ${freshNews.length} news → drip`);
+    console.log(`[Feed] ready in ${(loadMs/1000).toFixed(2)}s | ${freshTweets.length} tweets (instant) | ${freshNews.length} news (instant)`);
 
     // If server sent nothing at all, hide skeletons and show proper empty state
     if (freshTweets.length === 0) {
@@ -1057,11 +1064,10 @@ function _insertTweet(data, _unused, dripIndex) {
     const existing = scroll.querySelectorAll('.tweet-card');
     if (existing.length >= MAX_CARDS) existing[existing.length-1].remove();
     const card = buildTweetCard(data);
-    // Login batch: staggered loginPop with slight per-card delay for cascade effect
-    // Live tweets: instant slideIn (no delay, no bounce — feels real-time)
+    // Login batch: no animation, cards appear instantly (login-pop is CSS-disabled)
+    // Live tweets: subtle slideIn from bottom — feels real-time
     if (typeof dripIndex === 'number') {
         card.classList.add('login-pop');
-        card.style.animationDelay = (dripIndex * 35) + 'ms';
     } else {
         card.classList.add('slideIn');
     }
@@ -1215,7 +1221,8 @@ function _insertNews(data) {
         ${data.snippet?`<div class="news-snippet">${esc(data.snippet)}</div>`:''}
         ${tags?`<div class="news-tags">${tags}</div>`:''}`;
     card.addEventListener('click', () => { if(data.url) window.open(data.url,'_blank'); });
-    card.classList.add('pop-in');
+    // Only animate live items — batch/login items appear instantly
+    if (!_batchRendering) card.classList.add('live-item');
     scroll.insertBefore(card, scroll.firstChild);
     newsCount++;
     document.getElementById('newsCount').textContent = newsCount + (newsCount === 1 ? ' article' : ' articles');
