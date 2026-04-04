@@ -472,6 +472,15 @@
 
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // Cursor glow
+(function() {
+    const token = localStorage.getItem('ki_session') || localStorage.getItem('ki_token');
+    if (token) {
+        fetch('/api/auth/me', { headers: { 'x-session-token': token } })
+        .then(r => r.json())
+        .then(d => { if (d.authenticated) window.location.href = '/dashboard.html'; })
+        .catch(() => {});
+    }
+})();
 document.addEventListener("mousemove", function(e) {
     var g = document.getElementById("cursorGlow");
     g.style.left = e.clientX + "px";
