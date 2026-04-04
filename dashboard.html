@@ -83,8 +83,8 @@
         .tab-panel { display: none; flex: 1; overflow: hidden; gap: 14px; align-items: stretch; }
         .tab-panel.active { display: flex; align-items: stretch; }
         .tab-panel .tracking-layout { flex: 1; align-items: stretch; }
-        #panelTelegram.active { display: flex; align-items: flex-start; overflow-y: auto; }
-        #panelTelegram.active > div { align-items: flex-start !important; }
+        #panelTelegram.active { display: flex; align-items: flex-start; overflow-y: auto; flex: none; width: 100%; }
+        #panelTelegram.active > div { align-items: flex-start !important; flex: none !important; width: 100% !important; height: auto !important; }
 
         /* PANELS — same as before */
         .panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border-radius: 18px; border: 1px solid var(--border); }
@@ -397,7 +397,7 @@
             .add-btn { font-size: 12px; padding: 8px 12px; }
 
             /* ── TELEGRAM PANEL ── */
-            #panelTelegram { overflow-y: auto !important; overflow-x: hidden !important; align-items: flex-start !important; height: auto !important; max-height: calc(100dvh - 110px) !important; }
+            #panelTelegram { overflow-y: auto !important; overflow-x: hidden !important; align-items: flex-start !important; height: auto !important; max-height: calc(100dvh - 110px) !important; flex: none !important; }
             #panelTelegram > div { flex-direction: column !important; height: auto !important; min-height: 0 !important; overflow: visible !important; }
             #panelTelegram .tracking-col { height: auto !important; min-height: 0 !important; flex: none !important; width: 100% !important; overflow: visible !important; }
             #panelTelegram .panel { display: none !important; }
@@ -691,7 +691,7 @@
 
         <!-- TAB: TELEGRAM -->
         <div class="tab-panel" id="panelTelegram">
-            <div style="flex:1;display:flex;gap:14px;align-items:flex-start;height:fit-content;">
+            <div style="display:flex;gap:14px;align-items:flex-start;width:100%;">
                 <div class="tracking-col" style="overflow-y:auto;display:flex;flex-direction:column;align-self:flex-start;">
                     <div style="padding:14px 16px;background:var(--topbar-bg);border-radius:18px 18px 0 0;flex-shrink:0;">
                         <h3 style="font-size:14px;font-weight:700;margin-bottom:3px;">📱 Connect Telegram</h3>
