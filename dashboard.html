@@ -837,6 +837,14 @@
 </div>
 
 <script>
+(function() {
+const token = localStorage.getItem('ki_session') || localStorage.getItem('ki_token');
+if (!token) { window.location.href = '/'; return; }
+fetch('/api/auth/me', { headers: { 'x-session-token': token } })
+.then(r => r.json())
+.then(d => { if (!d.authenticated) { localStorage.removeItem('ki_session'); localStorage.removeItem('ki_user'); window.location.href = '/'; } })
+.catch(() => {});
+})();
 let ws, tweetCount = 0, newsCount = 0, customCount = 0, kwMatchCount = 0;
 const MAX_CARDS = 500;
 const FREE_LIMIT = 3;
