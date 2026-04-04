@@ -595,8 +595,7 @@ async function doVerifyOTP() {
         var res = await fetch("/api/auth/verify-otp", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email, code}) });
         var data = await res.json();
         if (data.success) {
-            // SECURITY: sessionStorage clears on tab close; localStorage persists forever
-            sessionStorage.setItem("ki_session", data.sessionToken);
+            localStorage.setItem("ki_session", data.sessionToken);
             localStorage.setItem("ki_user", JSON.stringify(data.user));
             window.location.href = "/dashboard.html";
         } else {
